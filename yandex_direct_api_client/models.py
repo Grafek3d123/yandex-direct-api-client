@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import datetime as _dt
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -36,6 +37,16 @@ def _to_str(value: Any, default: str = "") -> str:
     return str(value)
 
 
+def _to_date(value: Any) -> Optional[_dt.date]:
+    """Разобрать дату Директа формата 'YYYY-MM-DD'. Пустое/недата -> None."""
+    if not value:
+        return None
+    try:
+        return _dt.date.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
 @dataclass
 class Campaign:
     """Кампания Директа."""
@@ -44,6 +55,8 @@ class Campaign:
     name: str
     status: Optional[str] = None
     state: Optional[str] = None
+    start_date: Optional[_dt.date] = None
+    end_date: Optional[_dt.date] = None
     raw: Dict[str, Any] = field(default_factory=dict, repr=False)
 
     @classmethod
@@ -53,6 +66,8 @@ class Campaign:
             name=_to_str(d.get("Name")),
             status=d.get("Status"),
             state=d.get("State"),
+            start_date=_to_date(d.get("StartDate")),
+            end_date=_to_date(d.get("EndDate")),
             raw=d,
         )
 

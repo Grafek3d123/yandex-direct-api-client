@@ -32,8 +32,10 @@ htmlcov/
 .hypothesis/
 
 # Environments / secrets
+# Игнорируем ВСЕ .env-файлы с токенами; в git попадает только шаблон .env.example
 .env
-.env.local
+.env.*
+!.env.example
 *.local
 
 # IDE

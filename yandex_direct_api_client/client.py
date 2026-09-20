@@ -224,7 +224,14 @@ class YandexDirectClient:
             "method": "get",
             "params": {
                 "SelectionCriteria": criteria,
-                "FieldNames": ["Id", "Name", "Status", "State"],
+                "FieldNames": [
+                    "Id",
+                    "Name",
+                    "Status",
+                    "State",
+                    "StartDate",
+                    "EndDate",
+                ],
             },
         }
         resp = self._post("campaigns", payload)
