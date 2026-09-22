@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from yandex_direct_api_client.models import (
     Ad,
+    AdGroup,
     AdText,
-    AdTextEntry,
     Campaign,
     StatRow,
     TokenResponse,
@@ -55,13 +55,14 @@ def test_ad_text_from_none() -> None:
     assert ad_text.href == ""
 
 
-def test_ad_text_entry_from_dict() -> None:
-    e = AdTextEntry.from_dict(
-        {"Id": 5, "TextAd": {"Title": "T", "Text": "B", "Href": "H"}}
+def test_ad_group_from_dict() -> None:
+    g = AdGroup.from_dict(
+        {"Id": 55, "CampaignId": 7, "Name": "Группа", "Status": "ACCEPTED", "State": "ON"}
     )
-    assert e.id == 5
-    assert e.text_ad.title == "T"
-    assert e.text_ad.text == "B"
+    assert g.id == 55
+    assert g.campaign_id == 7
+    assert g.name == "Группа"
+    assert g.status == "ACCEPTED"
 
 
 def test_stat_row_from_tsv_row_full() -> None:
@@ -93,14 +94,23 @@ def test_stat_row_from_tsv_row_invalid() -> None:
 
 
 def test_stat_row_merged_with() -> None:
-    a = StatRow(ad_id=1, impressions=100, clicks=1, cost=1.0, bounces=0)
-    b = StatRow(ad_id=1, impressions=100, clicks=3, cost=2.0, bounces=1)
+    a = StatRow(ad_id=1, impressions=100, clicks=10, cost=1.0, bounces=2)
+    b = StatRow(ad_id=1, impressions=100, clicks=10, cost=2.0, bounces=4)
     m = a.merged_with(b)
     assert m.impressions == 200
-    assert m.clicks == 4
-    assert m.ctr == 2.0
+    assert m.clicks == 20
+    assert m.ctr == 10.0
     assert m.cost == 3.0
-    assert m.bounces == 1
+    assert m.bounces == 6
+    # bounce_rate = 6 / 20 * 100 = 30.0
+    assert m.bounce_rate == 30.0
+
+
+def test_stat_row_merged_with_zero_clicks() -> None:
+    a = StatRow(ad_id=1, impressions=100, clicks=0, bounces=0)
+    b = StatRow(ad_id=1, impressions=50, clicks=0, bounces=0)
+    m = a.merged_with(b)
+    assert m.bounce_rate == 0.0
 
 
 def test_token_response_from_dict() -> None:

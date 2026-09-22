@@ -31,7 +31,7 @@ YEAR = 2026
 def main() -> int:
     client = YandexDirectClient(readonly=True)  # mutating-методы заблокированы
 
-    campaigns = client.get_campaigns()
+    campaigns = client.campaigns.list()
     print(f"Всего кампаний у клиента: {len(campaigns)}")
     print("=" * 100)
     print(f"{'ID':>10}  {'Status':<12} {'State':<10} {'StartDate':<12} "

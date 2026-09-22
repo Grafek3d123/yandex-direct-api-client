@@ -5,17 +5,17 @@ import pytest
 import responses
 
 from yandex_direct_api_client import YandexDirectClient
-from yandex_direct_api_client.client import parse_stats_tsv
 from yandex_direct_api_client.exceptions import ApiError, ValidationError
+from yandex_direct_api_client.services.reports import parse_stats_tsv
 
 CAMPAIGNS_URL = "https://api.direct.yandex.com/json/v5/campaigns/"
 ADS_URL = "https://api.direct.yandex.com/json/v5/ads/"
 REPORTS_URL = "https://api.direct.yandex.com/json/v5/reports/"
 
 
-# ---------- get_campaigns ----------
+# ---------- campaigns.list ----------
 @responses.activate
-def test_get_campaigns_success(client: YandexDirectClient) -> None:
+def test_campaigns_list_success(client: YandexDirectClient) -> None:
     responses.add(
         responses.POST,
         CAMPAIGNS_URL,
@@ -29,14 +29,14 @@ def test_get_campaigns_success(client: YandexDirectClient) -> None:
         },
         status=200,
     )
-    result = client.get_campaigns()
+    result = client.campaigns.list()
     assert len(result) == 2
     assert result[0].id == 1
     assert result[1].name == "B"
 
 
 @responses.activate
-def test_get_campaigns_error_in_body(client: YandexDirectClient) -> None:
+def test_campaigns_list_error_in_body(client: YandexDirectClient) -> None:
     responses.add(
         responses.POST,
         CAMPAIGNS_URL,
@@ -49,19 +49,84 @@ def test_get_campaigns_error_in_body(client: YandexDirectClient) -> None:
         status=200,
     )
     with pytest.raises(ApiError):
-        client.get_campaigns()
+        client.campaigns.list()
 
 
-# ---------- get_ads ----------
 @responses.activate
-def test_get_ads_by_ids_chunks_requests(
-    client: YandexDirectClient,
-) -> None:
-    # chunk_size=2 → 3 id = 2 запроса
+def test_campaigns_list_pagination(client: YandexDirectClient) -> None:
+    """Проверяем, что LimitedBy корректно обрабатывается."""
+    responses.add(
+        responses.POST,
+        CAMPAIGNS_URL,
+        json={
+            "result": {
+                "Campaigns": [
+                    {"Id": 1, "Name": "A"},
+                    {"Id": 2, "Name": "B"},
+                ],
+                "LimitedBy": 2,
+            }
+        },
+        status=200,
+    )
+    responses.add(
+        responses.POST,
+        CAMPAIGNS_URL,
+        json={
+            "result": {
+                "Campaigns": [{"Id": 3, "Name": "C"}],
+            }
+        },
+        status=200,
+    )
+    result = client.campaigns.list(page_limit=2)
+    assert len(result) == 3
+    assert len(responses.calls) == 2
+
+
+# ---------- campaigns.get ----------
+@responses.activate
+def test_campaigns_get_by_ids(client: YandexDirectClient) -> None:
+    responses.add(
+        responses.POST,
+        CAMPAIGNS_URL,
+        json={"result": {"Campaigns": [{"Id": 10, "Name": "X"}]}},
+        status=200,
+    )
+    result = client.campaigns.get([10])
+    assert len(result) == 1
+    assert result[0].id == 10
+
+
+def test_campaigns_get_empty(client: YandexDirectClient) -> None:
+    assert client.campaigns.get([]) == []
+
+
+# ---------- ads.list ----------
+@responses.activate
+def test_ads_list_by_campaign_ids(client: YandexDirectClient) -> None:
     responses.add(
         responses.POST,
         ADS_URL,
-        json={"result": {"Ads": [{"Id": 1}, {"Id": 2}]}},
+        json={"result": {"Ads": [{"Id": 10, "CampaignId": 5}]}},
+        status=200,
+    )
+    ads = client.ads.list(campaign_ids=[5])
+    assert len(ads) == 1
+    assert ads[0].campaign_id == 5
+
+
+@responses.activate
+def test_ads_list_pagination(client: YandexDirectClient) -> None:
+    responses.add(
+        responses.POST,
+        ADS_URL,
+        json={
+            "result": {
+                "Ads": [{"Id": 1}, {"Id": 2}],
+                "LimitedBy": 2,
+            }
+        },
         status=200,
     )
     responses.add(
@@ -70,99 +135,38 @@ def test_get_ads_by_ids_chunks_requests(
         json={"result": {"Ads": [{"Id": 3}]}},
         status=200,
     )
-    ads = client.get_ads(ad_ids=[1, 2, 3])
+    ads = client.ads.list(campaign_ids=[1], page_limit=2)
     assert len(ads) == 3
     assert len(responses.calls) == 2
 
 
+# ---------- ads.get ----------
 @responses.activate
-def test_get_ads_requires_filter(client: YandexDirectClient) -> None:
-    with pytest.raises(ValidationError):
-        client.get_ads()
-
-
-@responses.activate
-def test_get_ads_by_campaign_ids(client: YandexDirectClient) -> None:
+def test_ads_get_by_ids(client: YandexDirectClient) -> None:
     responses.add(
         responses.POST,
         ADS_URL,
-        json={"result": {"Ads": [{"Id": 10, "CampaignId": 5}]}},
+        json={"result": {"Ads": [{"Id": 1}, {"Id": 2}]}},
         status=200,
     )
-    ads = client.get_ads(campaign_ids=[5])
-    assert len(ads) == 1
-    assert ads[0].campaign_id == 5
+    ads = client.ads.get([1, 2])
+    assert len(ads) == 2
 
 
-# ---------- get_ads_text_batch ----------
+def test_ads_get_empty(client: YandexDirectClient) -> None:
+    assert client.ads.get([]) == []
+
+
+# ---------- ads.update_text ----------
 @responses.activate
-def test_get_ads_text_batch(client: YandexDirectClient) -> None:
-    responses.add(
-        responses.POST,
-        ADS_URL,
-        json={
-            "result": {
-                "Ads": [
-                    {
-                        "Id": 1,
-                        "Type": "TEXT_AD",
-                        "TextAd": {
-                            "Title": "T1",
-                            "Text": "B1",
-                            "Href": "h1",
-                        },
-                    },
-                    {
-                        "Id": 2,
-                        "Type": "TEXT_AD",
-                        "TextAd": {
-                            "Title": "T2",
-                            "Text": "B2",
-                            "Href": "h2",
-                        },
-                    },
-                ]
-            }
-        },
-        status=200,
-    )
-    out = client.get_ads_text_batch([1, 2])
-    assert set(out.keys()) == {1, 2}
-    assert out[1].text_ad.title == "T1"
-    assert out[2].text_ad.href == "h2"
-
-
-# ---------- get_stats ----------
-@responses.activate
-def test_get_stats_parses_tsv(client: YandexDirectClient) -> None:
-    tsv = (
-        "Type\tDate\tAdId\tImpressions\tClicks\tCtr\tCost\tBounceRate\tBounces\n"
-        "AD_PERFORMANCE\t2026-09-01\t100\t1000\t20\t2.00\t1500000\t10.5\t5\n"
-        "AD_PERFORMANCE\t2026-09-02\t100\t500\t5\t1.00\t500000\t5.5\t2\n"
-        "Total\t\t\t1500\t25\t\t2000000\t\t\n"
-    )
-    responses.add(responses.POST, REPORTS_URL, body=tsv, status=200)
-    rows = client.get_stats(ad_ids=[100], period_days=7)
-    assert len(rows) == 1
-    assert rows[0].ad_id == 100
-    assert rows[0].impressions == 1500
-    assert rows[0].clicks == 25
-
-
-def test_parse_stats_tsv_no_header() -> None:
-    assert parse_stats_tsv("random text\nno header here") == []
-
-
-# ---------- update_ad ----------
-@responses.activate
-def test_update_ad_success(client: YandexDirectClient) -> None:
+def test_ads_update_text_success(client: YandexDirectClient) -> None:
     responses.add(
         responses.POST,
         ADS_URL,
         json={"result": {"UpdateResults": [{"Id": 1}]}},
         status=200,
     )
-    res = client.update_ad(1, "Заголовок", "Текст объявления")
+    res = client.ads.update_text(1, "Заголовок", "Текст объявления")
     assert res["Id"] == 1
     body = responses.calls[0].request.body
     assert body is not None
@@ -177,7 +181,7 @@ def test_update_ad_success(client: YandexDirectClient) -> None:
 
 
 @responses.activate
-def test_update_ad_clamps_long_strings(
+def test_ads_update_text_clamps_long_strings(
     client: YandexDirectClient,
 ) -> None:
     long_title = "A" * 200
@@ -188,11 +192,10 @@ def test_update_ad_clamps_long_strings(
         json={"result": {"UpdateResults": [{"Id": 1}]}},
         status=200,
     )
-    client.update_ad(1, long_title, long_body)
+    client.ads.update_text(1, long_title, long_body)
     body = responses.calls[0].request.body
     if isinstance(body, bytes):
         body = body.decode("utf-8")
-    # Ищем фактическую длину через парсинг JSON
     import json as _json
 
     payload = _json.loads(body)
@@ -203,7 +206,7 @@ def test_update_ad_clamps_long_strings(
 
 
 @responses.activate
-def test_update_ad_api_error(client: YandexDirectClient) -> None:
+def test_ads_update_text_api_error(client: YandexDirectClient) -> None:
     responses.add(
         responses.POST,
         ADS_URL,
@@ -217,38 +220,167 @@ def test_update_ad_api_error(client: YandexDirectClient) -> None:
         status=200,
     )
     with pytest.raises(ApiError):
-        client.update_ad(1, "T", "B")
+        client.ads.update_text(1, "T", "B")
 
 
-# ---------- delete_ad ----------
+# ---------- ads.delete ----------
 @responses.activate
-def test_delete_ad_chunks(client: YandexDirectClient) -> None:
-    # chunk_size=2 → 3 id = 2 запроса (лимит mutate 200, но chunk_size = 2)
+def test_ads_delete_chunks(client: YandexDirectClient) -> None:
+    # 3 ids fit in one chunk (MAX_MUTATE_IDS=200) → 1 request
     responses.add(
         responses.POST,
         ADS_URL,
-        json={
-            "result": {
-                "DeleteResults": [{"Id": 1}, {"Id": 2}]
-            }
-        },
+        json={"result": {"DeleteResults": [{"Id": 1}, {"Id": 2}, {"Id": 3}]}},
         status=200,
     )
-    responses.add(
-        responses.POST,
-        ADS_URL,
-        json={"result": {"DeleteResults": [{"Id": 3}]}},
-        status=200,
-    )
-    res = client.delete_ad([1, 2, 3])
+    res = client.ads.delete([1, 2, 3], confirm=True)
     assert len(res) == 3
-    assert len(responses.calls) == 2
+    assert len(responses.calls) == 1
 
 
 @responses.activate
-def test_delete_ad_empty(client: YandexDirectClient) -> None:
-    assert client.delete_ad([]) == []
+def test_ads_delete_empty(client: YandexDirectClient) -> None:
+    assert client.ads.delete([], confirm=True) == []
     assert len(responses.calls) == 0
+
+
+# ---------- ads.create ----------
+@responses.activate
+def test_ads_create_batch(client: YandexDirectClient) -> None:
+    responses.add(
+        responses.POST,
+        ADS_URL,
+        json={"result": {"AddResults": [{"Id": 100}, {"Id": 101}]}},
+        status=200,
+    )
+    res = client.ads.create([
+        {"CampaignId": 1, "AdGroupId": 2, "TextAd": {"Title": "T", "Text": "B"}},
+        {"CampaignId": 1, "AdGroupId": 2, "TextAd": {"Title": "T2", "Text": "B2"}},
+    ])
+    assert len(res) == 2
+    assert res[0]["Id"] == 100
+
+
+# ---------- ads.update (batch) ----------
+@responses.activate
+def test_ads_update_batch(client: YandexDirectClient) -> None:
+    responses.add(
+        responses.POST,
+        ADS_URL,
+        json={"result": {"UpdateResults": [{"Id": 1}, {"Id": 2}]}},
+        status=200,
+    )
+    res = client.ads.update([
+        {"Id": 1, "TextAd": {"Title": "T1", "Text": "B1"}},
+        {"Id": 2, "TextAd": {"Title": "T2", "Text": "B2"}},
+    ], confirm=True)
+    assert len(res) == 2
+
+
+# ---------- campaigns.create ----------
+@responses.activate
+def test_campaigns_create(client: YandexDirectClient) -> None:
+    responses.add(
+        responses.POST,
+        CAMPAIGNS_URL,
+        json={"result": {"AddResults": [{"Id": 999}]}},
+        status=200,
+    )
+    res = client.campaigns.create({"Name": "Новая кампания"})
+    assert res["Id"] == 999
+
+
+# ---------- campaigns.update ----------
+@responses.activate
+def test_campaigns_update(client: YandexDirectClient) -> None:
+    responses.add(
+        responses.POST,
+        CAMPAIGNS_URL,
+        json={"result": {"UpdateResults": [{"Id": 999}]}},
+        status=200,
+    )
+    res = client.campaigns.update({"Id": 999, "Name": "Обновлённая"})
+    assert res["Id"] == 999
+
+
+# ---------- campaigns.delete ----------
+@responses.activate
+def test_campaigns_delete(client: YandexDirectClient) -> None:
+    responses.add(
+        responses.POST,
+        CAMPAIGNS_URL,
+        json={"result": {"DeleteResults": [{"Id": 1}]}},
+        status=200,
+    )
+    res = client.campaigns.delete([1], confirm=True)
+    assert len(res) == 1
+
+
+# ---------- reports.get_ad_stats ----------
+@responses.activate
+def test_reports_get_ad_stats(client: YandexDirectClient) -> None:
+    tsv = (
+        "Type	Date	AdId	Impressions	Clicks	Ctr	Cost	BounceRate	Bounces\n"
+        "AD_PERFORMANCE	2026-09-01	100	1000	20	2.00	1500000	10.5	5\n"
+        "AD_PERFORMANCE	2026-09-02	100	500	5	1.00	500000	5.5	2\n"
+        "Total			1500	25		2000000		\n"
+    )
+    responses.add(responses.POST, REPORTS_URL, body=tsv, status=200)
+    rows = client.reports.get_ad_stats(ad_ids=[100], period_days=7)
+    assert len(rows) == 1
+    assert rows[0].ad_id == 100
+    assert rows[0].impressions == 1500
+    assert rows[0].clicks == 25
+
+
+def test_parse_stats_tsv_no_header() -> None:
+    assert parse_stats_tsv("random text\nno header here") == []
+
+
+# ---------- confirm guard ----------
+def test_ads_delete_requires_confirm(client: YandexDirectClient) -> None:
+    with pytest.raises(ValidationError) as exc:
+        client.ads.delete([1, 2, 3])
+    assert "confirm" in str(exc.value)
+    assert len(responses.calls) == 0
+
+
+def test_campaigns_delete_requires_confirm(client: YandexDirectClient) -> None:
+    with pytest.raises(ValidationError):
+        client.campaigns.delete([1])
+    assert len(responses.calls) == 0
+
+
+def test_ads_update_batch_requires_confirm(client: YandexDirectClient) -> None:
+    with pytest.raises(ValidationError):
+        client.ads.update([{"Id": 1, "TextAd": {"Title": "T", "Text": "B"}}])
+    assert len(responses.calls) == 0
+
+
+@responses.activate
+def test_ads_update_text_no_confirm_needed(client: YandexDirectClient) -> None:
+    """update_text — одиночная операция, confirm не требуется."""
+    responses.add(
+        responses.POST,
+        ADS_URL,
+        json={"result": {"UpdateResults": [{"Id": 1}]}},
+        status=200,
+    )
+    res = client.ads.update_text(1, "T", "B")
+    assert res["Id"] == 1
+    assert len(responses.calls) == 1
+
+
+@responses.activate
+def test_ads_delete_with_confirm_succeeds(client: YandexDirectClient) -> None:
+    responses.add(
+        responses.POST,
+        ADS_URL,
+        json={"result": {"DeleteResults": [{"Id": 1}]}},
+        status=200,
+    )
+    res = client.ads.delete([1], confirm=True)
+    assert res[0]["Id"] == 1
 
 
 # ---------- context manager ----------
@@ -257,4 +389,4 @@ def test_context_manager_closes_session() -> None:
         token="t", client_login="L", rate_limit_rps=1000.0
     ) as c:
         assert c.client_login == "L"
-    assert c._closed
+    assert c._transport.closed

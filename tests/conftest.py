@@ -27,7 +27,6 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[YandexDirectClient]:
         client_login="TESTLOGIN",
         rate_limit_rps=1000.0,
         max_retries=2,
-        chunk_size=2,  # заставляем авто-чанкинг сработать в тестах
     )
     try:
         yield c

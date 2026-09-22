@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-22
+
+### Added
+- `confirm=True` guard for destructive operations: `ads.delete`, `campaigns.delete`,
+  and bulk `ads.update` now raise `ValidationError` unless explicitly confirmed.
+  Single-item operations (`update_text`, `campaigns.update`, `campaigns.create`,
+  `ads.create`) do not require confirmation.
+
+### Removed
+- Unused `DEFAULT_CHUNK_SIZE` constant from `config.py`.
+
+## [0.2.0] - 2026-09-22
+
+### Breaking changes
+- Client API restructured to namespace-based: `client.campaigns.list()` instead of `client.get_campaigns()`.
+- `client.ads.update_text()` replaces `client.update_ad()`.
+- `client.ads.delete()` replaces `client.delete_ad()`.
+- `client.campaigns.create()` replaces `client.add_campaign()`.
+- `client.reports.get_ad_stats()` replaces `client.get_stats()`.
+- `chunk_size` parameter removed from constructor (pagination handles this internally).
+- `AdTextEntry` model removed (use `Ad` with `include_text=True` instead).
+- `StatRow.merged_with` now computes weighted-average `bounce_rate` instead of summing.
+
+### Added
+- Namespace services: `client.campaigns`, `client.ads`, `client.ad_groups`, `client.reports`.
+- Auto-pagination via `Page`/`LimitedBy` in all `list()` methods.
+- `AdGroup` model and `client.ad_groups` service (list, get).
+- `client.campaigns.update()` and `client.campaigns.delete()`.
+- `client.ads.create()` and `client.ads.update()` — batch operations (up to 200 per request).
+- `client.ads.list()` — flexible filtering with auto-pagination.
+- `Transport` class extracted for HTTP layer separation.
+- `models/` package with per-entity modules.
+- `services/` package with per-resource service classes.
+
+### Changed
+- `Campaign` model now includes `type` field.
+- `requests.Session` lock removed (Session is thread-safe for independent requests).
+- `DEFAULT_CHUNK_SIZE` constant removed from config.
+
 ## [0.1.0] - 2026-09-20
 
 ### Added

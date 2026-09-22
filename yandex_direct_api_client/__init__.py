@@ -8,14 +8,14 @@ Public API:
         ReportNotReadyError, ApiError, ValidationError,
     )
     from yandex_direct_api_client import (
-        Campaign, Ad, AdText, AdTextEntry, StatRow, TokenResponse,
+        Campaign, Ad, AdGroup, AdText, StatRow, TokenResponse,
     )
     from yandex_direct_api_client.auth import get_new_token, refresh_token
 """
 from __future__ import annotations
 
 from ._version import __version__
-from .client import YandexDirectClient, parse_stats_tsv
+from .client import YandexDirectClient
 from .exceptions import (
     ApiError,
     AuthError,
@@ -26,12 +26,13 @@ from .exceptions import (
 )
 from .models import (
     Ad,
+    AdGroup,
     AdText,
-    AdTextEntry,
     Campaign,
     StatRow,
     TokenResponse,
 )
+from .services.reports import parse_stats_tsv
 
 __all__ = [
     "__version__",
@@ -48,8 +49,8 @@ __all__ = [
     # models
     "Campaign",
     "Ad",
+    "AdGroup",
     "AdText",
-    "AdTextEntry",
     "StatRow",
     "TokenResponse",
 ]
