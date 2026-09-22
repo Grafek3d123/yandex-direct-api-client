@@ -64,15 +64,11 @@ def test_readonly_blocks_ads_delete(ro_client: YandexDirectClient) -> None:
 
 
 def test_readonly_property_ro() -> None:
-    assert ro_client_readonly() is True
-
-
-def ro_client_readonly() -> bool:
     c = YandexDirectClient(
         token="t", client_login="L", readonly=True, rate_limit_rps=1000.0
     )
     try:
-        return c.readonly
+        assert c.readonly is True
     finally:
         c.close()
 

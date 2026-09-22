@@ -4,9 +4,16 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence
 
 from .._transport import Transport
-from ..exceptions import ApiError, ValidationError
+from ..exceptions import ValidationError
 from ..models.ad import Ad, AdImage, AdText
-from ._base import MAX_MUTATE_IDS, chunked, ensure_confirmed, fetch_all_pages
+from ._base import (
+    MAX_MUTATE_IDS,
+    check_item_errors,
+    chunked,
+    ensure_confirmed,
+    ensure_writable,
+    fetch_all_pages,
+)
 
 _DEFAULT_FIELDS = ["Id", "CampaignId", "AdGroupId", "Status", "State", "Type"]
 _TEXT_LIMITS = {"Title": 56, "Text": 81}
@@ -26,10 +33,7 @@ class AdService:
         self._readonly = readonly
 
     def _ensure_writable(self, method_name: str) -> None:
-        if self._readonly:
-            raise ValidationError(
-                f"Метод ads.{method_name} запрещён в readonly-режиме"
-            )
+        ensure_writable("ads", method_name, self._readonly)
 
     def list(
         self,
@@ -122,7 +126,7 @@ class AdService:
             }
             result = self._transport.post_result("ads", payload)
             for item in result.get("AddResults") or []:
-                _check_item_errors(item, f"создания объявления id={item.get('Id')}")
+                check_item_errors(item, f"создания объявления id={item.get('Id')}")
                 results.append(item)
         return results
 
@@ -176,7 +180,7 @@ class AdService:
             }
             result = self._transport.post_result("ads", payload)
             for item in result.get("UpdateResults") or []:
-                _check_item_errors(item, f"обновления объявления id={item.get('Id')}")
+                check_item_errors(item, f"обновления объявления id={item.get('Id')}")
                 results.append(item)
         return results
 
@@ -234,20 +238,9 @@ class AdService:
             }
             result = self._transport.post_result("ads", payload)
             for item in result.get("DeleteResults") or []:
-                _check_item_errors(item, f"удаления объявления id={item.get('Id')}")
+                check_item_errors(item, f"удаления объявления id={item.get('Id')}")
                 results.append(item)
         return results
-
-
-def _check_item_errors(item: Dict[str, Any], action: str) -> None:
-    errors = item.get("Errors") or []
-    if errors:
-        raise ApiError(
-            f"Ошибка {action}: {errors[0].get('Message') or errors[0].get('Code')}",
-            details=errors,
-            status_code=200,
-            response_body=item,
-        )
 
 
 __all__ = ["AdService"]

@@ -9,17 +9,19 @@ from __future__ import annotations
 
 import argparse
 import http.server
+import json
 import logging
 import secrets
 import socket
 import socketserver
 import sys
 import threading
+import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional
 
 from .exceptions import AuthError
 from .models import TokenResponse
@@ -96,23 +98,14 @@ def _find_free_port(preferred: int = DEFAULT_PORT) -> int:
     raise OSError(f"Не удалось найти свободный порт рядом с {preferred}")
 
 
-def _exchange_code_for_token(
-    client_id: str,
-    client_secret: str,
-    code: str,
-    redirect_uri: str,
+def _post_token_request(
+    form: Dict[str, str],
+    *,
+    error_context: str,
     timeout: float = 30.0,
 ) -> TokenResponse:
-    """POST /token с grant_type=authorization_code."""
-    body = urllib.parse.urlencode(
-        {
-            "grant_type": "authorization_code",
-            "code": code,
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "redirect_uri": redirect_uri,
-        }
-    ).encode("utf-8")
+    """POST /token с form-данными и разбором ответа (общий путь)."""
+    body = urllib.parse.urlencode(form).encode("utf-8")
     req = urllib.request.Request(
         OAUTH_TOKEN_URL,
         data=body,
@@ -125,13 +118,13 @@ def _exchange_code_for_token(
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", errors="replace")
         raise AuthError(
-            f"Не удалось обменять code на токен: HTTP {e.code}: {detail[:300]}",
+            f"{error_context}: HTTP {e.code}: {detail[:300]}",
             status_code=e.code,
         ) from e
     except urllib.error.URLError as e:
-        raise AuthError(f"Сетевая ошибка при обмене code: {e.reason}") from e
-
-    import json
+        raise AuthError(
+            f"Сетевая ошибка ({error_context}): {e.reason}"
+        ) from e
 
     try:
         data = json.loads(payload)
@@ -142,6 +135,27 @@ def _exchange_code_for_token(
         raise AuthError(f"В ответе OAuth нет access_token: keys={list(data)}")
 
     return TokenResponse.from_dict(data)
+
+
+def _exchange_code_for_token(
+    client_id: str,
+    client_secret: str,
+    code: str,
+    redirect_uri: str,
+    timeout: float = 30.0,
+) -> TokenResponse:
+    """POST /token с grant_type=authorization_code."""
+    return _post_token_request(
+        {
+            "grant_type": "authorization_code",
+            "code": code,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uri": redirect_uri,
+        },
+        error_context="Не удалось обменять code на токен",
+        timeout=timeout,
+    )
 
 
 def get_new_token(
@@ -272,7 +286,7 @@ def refresh_token(
     return TokenResponse.from_dict(data)
 
 
-def _parse_args(argv: Optional[List[str]] = None) -> Tuple[argparse.Namespace]:
+def _parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="python -m yandex_direct_api_client.auth",
         description="Получить или обновить OAuth-токен Яндекс.ID для Директа.",
@@ -292,13 +306,13 @@ def _parse_args(argv: Optional[List[str]] = None) -> Tuple[argparse.Namespace]:
     p_ref.add_argument("--client-secret", required=True)
     p_ref.add_argument("--refresh-token", required=True)
 
-    return (parser.parse_args(argv),)
+    return parser.parse_args(argv)
 
 
 def run_cli(argv: Optional[List[str]] = None) -> int:
     """Точка входа `python -m yandex_direct_api_client.auth`."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    (args,) = _parse_args(argv)
+    args = _parse_args(argv)
 
     try:
         if args.cmd == "new":

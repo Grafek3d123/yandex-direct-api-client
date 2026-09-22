@@ -4,9 +4,16 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence
 
 from .._transport import Transport
-from ..exceptions import ApiError, ValidationError
+from ..exceptions import ApiError
 from ..models.campaign import Campaign
-from ._base import MAX_GET_IDS, chunked, ensure_confirmed, fetch_all_pages
+from ._base import (
+    MAX_GET_IDS,
+    check_item_errors,
+    chunked,
+    ensure_confirmed,
+    ensure_writable,
+    fetch_all_pages,
+)
 
 _DEFAULT_FIELDS = [
     "Id",
@@ -27,10 +34,7 @@ class CampaignService:
         self._readonly = readonly
 
     def _ensure_writable(self, method_name: str) -> None:
-        if self._readonly:
-            raise ValidationError(
-                f"Метод campaigns.{method_name} запрещён в readonly-режиме"
-            )
+        ensure_writable("campaigns", method_name, self._readonly)
 
     def list(
         self,
@@ -111,7 +115,7 @@ class CampaignService:
                 response_body=result,
             )
         first: Dict[str, Any] = add_results[0]
-        _check_item_errors(first, "создания кампании")
+        check_item_errors(first, "создания кампании")
         return first
 
     def update(self, campaign: Dict[str, Any]) -> Dict[str, Any]:
@@ -134,7 +138,7 @@ class CampaignService:
                 response_body=result,
             )
         first: Dict[str, Any] = update_results[0]
-        _check_item_errors(first, "обновления кампании")
+        check_item_errors(first, "обновления кампании")
         return first
 
     def delete(self, ids: Sequence[int], *, confirm: bool = False) -> List[Dict[str, Any]]:
@@ -157,20 +161,9 @@ class CampaignService:
             }
             result = self._transport.post_result("campaigns", payload)
             for item in result.get("DeleteResults") or []:
-                _check_item_errors(item, f"удаления кампании id={item.get('Id')}")
+                check_item_errors(item, f"удаления кампании id={item.get('Id')}")
                 results.append(item)
         return results
-
-
-def _check_item_errors(item: Dict[str, Any], action: str) -> None:
-    errors = item.get("Errors") or []
-    if errors:
-        raise ApiError(
-            f"Ошибка {action}: {errors[0].get('Message') or errors[0].get('Code')}",
-            details=errors,
-            status_code=200,
-            response_body=item,
-        )
 
 
 __all__ = ["CampaignService"]

@@ -4,13 +4,14 @@ from __future__ import annotations
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
 
 from .._transport import Transport
-from ..exceptions import ApiError, ValidationError
 from ..models.retargeting_adjustment import RetargetingBidAdjustment
 from ._base import (
     MAX_GET_IDS,
     MAX_MUTATE_IDS,
+    check_item_errors,
     chunked,
     ensure_confirmed,
+    ensure_writable,
     fetch_all_pages,
 )
 
@@ -37,11 +38,7 @@ class RetargetingAdjustmentService:
         self._readonly = readonly
 
     def _ensure_writable(self, method_name: str) -> None:
-        if self._readonly:
-            raise ValidationError(
-                "Метод retargetingadjustments."
-                f"{method_name} запрещён в readonly-режиме"
-            )
+        ensure_writable("retargetingadjustments", method_name, self._readonly)
 
     def list(
         self,
@@ -122,7 +119,7 @@ class RetargetingAdjustmentService:
             }
             result = self._transport.post_result("retargetingadjustments", payload)
             for item in result.get("AddResults") or []:
-                _check_item_errors(
+                check_item_errors(
                     item,
                     f"добавления ретаргетинг-сегмента id={item.get('Id')}",
                 )
@@ -154,7 +151,7 @@ class RetargetingAdjustmentService:
             }
             result = self._transport.post_result("retargetingadjustments", payload)
             for item in result.get("UpdateResults") or []:
-                _check_item_errors(
+                check_item_errors(
                     item,
                     f"обновления ретаргетинг-сегмента id={item.get('Id')}",
                 )
@@ -186,7 +183,7 @@ class RetargetingAdjustmentService:
             }
             result = self._transport.post_result("retargetingadjustments", payload)
             for item in result.get("DeleteResults") or []:
-                _check_item_errors(
+                check_item_errors(
                     item,
                     f"удаления ретаргетинг-сегмента id={item.get('Id')}",
                 )
@@ -204,17 +201,6 @@ def _update_body(adjustment: AdjustmentInput) -> Dict[str, Any]:
     if isinstance(adjustment, RetargetingBidAdjustment):
         return adjustment.to_update_payload()
     return dict(adjustment)
-
-
-def _check_item_errors(item: Dict[str, Any], action: str) -> None:
-    errors = item.get("Errors") or []
-    if errors:
-        raise ApiError(
-            f"Ошибка {action}: {errors[0].get('Message') or errors[0].get('Code')}",
-            details=errors,
-            status_code=200,
-            response_body=item,
-        )
 
 
 __all__ = ["RetargetingAdjustmentService", "AdjustmentInput"]

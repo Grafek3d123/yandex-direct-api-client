@@ -4,13 +4,14 @@ from __future__ import annotations
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
 
 from .._transport import Transport
-from ..exceptions import ApiError, ValidationError
 from ..models.ad_group_item import AdGroupItem, AdGroupItemBids
 from ._base import (
     MAX_GET_IDS,
     MAX_MUTATE_IDS,
+    check_item_errors,
     chunked,
     ensure_confirmed,
+    ensure_writable,
     fetch_all_pages,
 )
 
@@ -28,10 +29,7 @@ class AdGroupItemService:
         self._readonly = readonly
 
     def _ensure_writable(self, method_name: str) -> None:
-        if self._readonly:
-            raise ValidationError(
-                f"Метод criteria.{method_name} запрещён в readonly-режиме"
-            )
+        ensure_writable("criteria", method_name, self._readonly)
 
     def list(
         self,
@@ -110,7 +108,7 @@ class AdGroupItemService:
             }
             result = self._transport.post_result("criteria", payload)
             for item in result.get("AddResults") or []:
-                _check_item_errors(
+                check_item_errors(
                     item, f"добавления ключевой фразы id={item.get('Id')}"
                 )
                 results.append(item)
@@ -141,7 +139,7 @@ class AdGroupItemService:
             }
             result = self._transport.post_result("criteria", payload)
             for item in result.get("SetBidsResults") or []:
-                _check_item_errors(
+                check_item_errors(
                     item, f"изменения ставки id={item.get('Id')}"
                 )
                 results.append(item)
@@ -192,7 +190,7 @@ class AdGroupItemService:
             }
             result = self._transport.post_result("criteria", payload)
             for item in result.get("DeleteResults") or []:
-                _check_item_errors(
+                check_item_errors(
                     item, f"удаления ключевой фразы id={item.get('Id')}"
                 )
                 results.append(item)
@@ -209,17 +207,6 @@ def _bids_body(bids: AdGroupItemBidsInput) -> Dict[str, Any]:
     if isinstance(bids, AdGroupItemBids):
         return bids.to_payload()
     return dict(bids)
-
-
-def _check_item_errors(item: Dict[str, Any], action: str) -> None:
-    errors = item.get("Errors") or []
-    if errors:
-        raise ApiError(
-            f"Ошибка {action}: {errors[0].get('Message') or errors[0].get('Code')}",
-            details=errors,
-            status_code=200,
-            response_body=item,
-        )
 
 
 __all__ = ["AdGroupItemService", "AdGroupItemInput", "AdGroupItemBidsInput"]

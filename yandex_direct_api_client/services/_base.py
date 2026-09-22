@@ -1,10 +1,11 @@
-"""Базовые хелперы для сервисов (пагинация, чанкинг, confirm)."""
+"""Базовые хелперы для сервисов (пагинация, чанкинг, confirm, guard'ы)."""
 from __future__ import annotations
 
+import copy
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from .._transport import Transport
-from ..exceptions import ValidationError
+from ..exceptions import ApiError, ValidationError
 
 # API-лимиты (https://yandex.ru/dev/direct/doc/ref-v5/limits/)
 MAX_GET_IDS = 1000  # SelectionCriteria.Ids для get-методов кампаний
@@ -31,6 +32,37 @@ def ensure_confirmed(method_name: str, confirm: bool) -> None:
         )
 
 
+def ensure_writable(prefix: str, method_name: str, readonly: bool) -> None:
+    """Проверить, что mutating-метод разрешён (не readonly-режим).
+
+    :param prefix: имя неймспейса (например, "ads").
+    :param method_name: имя метода для сообщения об ошибке.
+    :param readonly: флаг readonly-режима клиента.
+    :raises ValidationError: если readonly=True.
+    """
+    if readonly:
+        raise ValidationError(
+            f"Метод {prefix}.{method_name} запрещён в readonly-режиме"
+        )
+
+
+def check_item_errors(item: Dict[str, Any], action: str) -> None:
+    """Проверить элемент AddResults/UpdateResults/DeleteResults на Errors.
+
+    :param item: элемент результата операции.
+    :param action: описание действия для сообщения об ошибке.
+    :raises ApiError: если в элементе есть Errors.
+    """
+    errors = item.get("Errors") or []
+    if errors:
+        raise ApiError(
+            f"Ошибка {action}: {errors[0].get('Message') or errors[0].get('Code')}",
+            details=errors,
+            status_code=200,
+            response_body=item,
+        )
+
+
 def fetch_all_pages(
     transport: Transport,
     service: str,
@@ -47,8 +79,6 @@ def fetch_all_pages(
     :param page_limit: размер страницы (Limit), по умолчанию 10000.
     :return: объединённый список всех объектов из всех страниц.
     """
-    import copy
-
     results: List[Dict[str, Any]] = []
     offset: Optional[int] = None
     while True:
@@ -80,6 +110,9 @@ def fetch_all_pages(
 __all__ = [
     "MAX_GET_IDS",
     "MAX_MUTATE_IDS",
+    "check_item_errors",
     "chunked",
+    "ensure_confirmed",
+    "ensure_writable",
     "fetch_all_pages",
 ]

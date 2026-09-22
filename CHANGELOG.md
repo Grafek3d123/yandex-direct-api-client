@@ -5,7 +5,43 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Migration guide: 0.1.x → 0.4.x
+
+The client was restructured into a namespace API. Summary of breaking changes
+with migration examples:
+
+| 0.1.x | 0.4.x |
+|---|---|
+| `client.get_campaigns()` | `client.campaigns.list()` |
+| `client.get_ads(ad_ids=..., campaign_ids=...)` | `client.ads.get(ids=...)` / `client.ads.list(campaign_ids=...)` |
+| `client.get_ads_text_batch(ids)` | `client.ads.get(ids, include_text=True)` |
+| `client.get_stats(...)` | `client.reports.get_ad_stats(...)` (unchanged) or `client.reports.get(...)` |
+| `client.update_ad(id, h, b)` | `client.ads.update_text(id, h, b)` |
+| `client.add_campaign(payload)` | `client.campaigns.create(payload)` |
+| `client.delete_ad(ids)` | `client.ads.delete(ids, confirm=True)` |
+| `YandexDirectClient(chunk_size=...)` | parameter removed (auto chunking/pagination) |
+| model `AdTextEntry` | `Ad` with `include_text=True` |
+| `parse_stats_tsv` importable from `client.py` | `yandex_direct_api_client` (re-exported) |
+
+New safety semantics:
+
+- `delete` and bulk mutations now require explicit `confirm=True`
+  (raises `ValidationError` before any HTTP request is sent).
+- `StatRow.merged_with` computes weighted-average `bounce_rate` (was: sum).
+
 ## [Unreleased]
+
+## [0.4.1] - 2026-09-22
+
+### Changed
+- Deduplicated service-level helpers: `check_item_errors` and `ensure_writable`
+  moved to `services/_base.py` (was copy-pasted in 4 services).
+- Deduplicated OAuth token exchange: `auth.refresh_token` and code exchange now
+  share a single `_post_token_request` implementation.
+- `services/_base.py`: `import copy` moved to module level.
+
+### Fixed
+- `auth._parse_args` no longer returns a 1-tuple (odd signature).
 
 ## [0.4.0] - 2026-09-22
 
