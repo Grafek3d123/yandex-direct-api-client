@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-22
+
+### Added
+- Full Reports API support: universal `client.reports.get()` with report type,
+  date period (`date_from`/`date_to` or `date_range_type`), custom fields,
+  filters (`ReportFilter`), ordering (`ReportOrder`), Metrika goals
+  (conversions), attribution models, VAT/discount flags, page limit and
+  per-call `report_timeout`.
+- Typed convenience wrappers: `account_stats`, `campaign_stats`,
+  `ad_group_stats`, `criteria_stats` (keywords/autotargeting),
+  `search_queries` — all delegate to `get()` (single execution path).
+- New models: `ReportFilter`, `ReportOrder`, `ReportRow` (typed accessors
+  `as_int/as_float/as_money/as_date`), `ReportResult` with `to_dicts()`,
+  `to_csv()`, `to_json()` and optional `to_dataframe()` (pandas optional).
+- Auto-batching for large requests: ID filters chunked by 1000 values per
+  report; long date ranges split into windows via `max_days` parameter.
+- `report_timeout` override per call (`Transport.post` parameter).
+- 25 new tests: parsing, filters/order/goals payload, 202 polling, timeout,
+  429 retry, API errors, ID chunking, date-window splitting, wrappers,
+  backward compatibility.
+
+### Fixed
+- `get_ad_stats` now sends ID filters via `SelectionCriteria.Filter`
+  (per official v5 spec) instead of non-standard `AdIds`/`CampaignIds` fields.
+
 ## [0.3.0] - 2026-09-22
 
 ### Added

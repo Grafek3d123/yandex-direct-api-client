@@ -166,7 +166,40 @@ new = refresh_token(
 
 | Method | Description | Mutates? |
 |---|---|---|
-| `get_ad_stats(ad_ids=None, ...)` | AD_PERFORMANCE_REPORT stats | no |
+| `get(report_type, field_names, date_from/date_to or date_range_type, ...)` | Universal report: filters, order, goals, attribution, VAT, chunking | no |
+| `account_stats(...)` | ACCOUNT_PERFORMANCE_REPORT | no |
+| `campaign_stats(campaign_ids=None, ...)` | CAMPAIGN_PERFORMANCE_REPORT | no |
+| `ad_group_stats(...)` | ADGROUP_PERFORMANCE_REPORT | no |
+| `criteria_stats(...)` | CRITERIA_PERFORMANCE_REPORT (keywords) | no |
+| `search_queries(...)` | SEARCH_QUERY_PERFORMANCE_REPORT | no |
+| `get_ad_stats(ad_ids=None, ...)` | AD_PERFORMANCE_REPORT → `List[StatRow]` (legacy) | no |
+
+Reports are async on the API side: the client polls `202/PROGRESS` with
+`Retry-In` until ready (configurable `report_timeout`), retries `429` with
+backoff, and converts errors to typed exceptions. Large requests are split
+automatically: ID filters chunked by 1000 values, long date ranges split
+into windows (`max_days`).
+
+```python
+from datetime import date
+from yandex_direct_api_client.models import ReportFilter, ReportOrder
+
+result = client.reports.campaign_stats(
+    campaign_ids=[1, 2],
+    date_from=date(2026, 9, 1),
+    date_to=date(2026, 9, 15),
+    goals=["12345"],                       # conversions by Metrika goal
+    filters=[ReportFilter("Clicks", "GREATER_THAN", ["10"])],
+    order_by=[ReportOrder("Clicks", ascending=False)],
+)
+for row in result.rows:
+    print(row.get("CampaignName"), row.as_int("Clicks"), row.as_money("Cost"))
+
+result.to_csv()      # CSV string
+result.to_json()     # JSON string
+result.to_dicts()    # list[dict]
+result.to_dataframe()  # pandas (optional dependency)
+```
 
 ## Exceptions
 

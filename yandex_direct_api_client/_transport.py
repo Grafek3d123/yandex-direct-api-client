@@ -69,12 +69,15 @@ class Transport:
         payload: Dict[str, Any],
         *,
         report: bool = False,
+        report_timeout: Optional[float] = None,
     ) -> requests.Response:
         """Выполнить POST-запрос к API-сервису.
 
         :param service: имя сервиса (campaigns, ads, reports, ...).
         :param payload: JSON-тело запроса.
         :param report: True для Reports API (polling 201/202).
+        :param report_timeout: override таймаута ожидания отчёта для
+            этого вызова (по умолчанию — из настроек клиента).
         """
         url = f"{self.api_url}/{service}/"
 
@@ -88,7 +91,7 @@ class Transport:
             max_retries=self._settings.max_retries,
             bucket=self._bucket,
             report=report,
-            report_timeout=self._report_timeout,
+            report_timeout=report_timeout or self._report_timeout,
         )
 
     def post_result(
