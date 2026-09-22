@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-22
+
+### Added
+- `client.ad_group_items` service (keywords, API service `criteria`): `list`, `get`,
+  `add` (typed `AdGroupItem` or raw dicts), `set_bid`, `set_bids` (bulk, requires
+  `confirm=True`), `delete` (requires `confirm=True`).
+- `client.retargeting_adjustments` service: `list`, `get`, `add`, `update`
+  (bulk, requires `confirm=True`), `delete` (requires `confirm=True`).
+- New models: `AdGroupItem`, `AdGroupItemBids`, `RetargetingBidAdjustment`,
+  `AdImage`; `AdText.to_payload()` for typed ad creation.
+- `client.ads.create_with_payload()` — create a text ad from typed
+  `AdText`/`AdImage` models.
+- Unit tests for all new services: pagination, batching, typed/raw payloads,
+  item-level errors, confirm and readonly guards (22 new tests).
+
 ## [0.2.1] - 2026-09-22
 
 ### Added

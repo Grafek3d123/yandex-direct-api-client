@@ -27,8 +27,12 @@ from .exceptions import (
 from .models import (
     Ad,
     AdGroup,
+    AdGroupItem,
+    AdGroupItemBids,
+    AdImage,
     AdText,
     Campaign,
+    RetargetingBidAdjustment,
     StatRow,
     TokenResponse,
 )
@@ -50,7 +54,11 @@ __all__ = [
     "Campaign",
     "Ad",
     "AdGroup",
+    "AdGroupItem",
+    "AdGroupItemBids",
+    "AdImage",
     "AdText",
+    "RetargetingBidAdjustment",
     "StatRow",
     "TokenResponse",
 ]
