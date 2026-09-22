@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from .._transport import Transport
 from ..exceptions import ApiError, ValidationError
-from ..models.ad import Ad
+from ..models.ad import Ad, AdImage, AdText
 from ._base import MAX_MUTATE_IDS, chunked, ensure_confirmed, fetch_all_pages
 
 _DEFAULT_FIELDS = ["Id", "CampaignId", "AdGroupId", "Status", "State", "Type"]
@@ -125,6 +125,36 @@ class AdService:
                 _check_item_errors(item, f"создания объявления id={item.get('Id')}")
                 results.append(item)
         return results
+
+    def create_with_payload(
+        self,
+        campaign_id: int,
+        text: AdText,
+        *,
+        image: Optional[AdImage] = None,
+        ad_group_id: Optional[int] = None,
+        type_: str = "TEXT_AD",
+    ) -> Dict[str, Any]:
+        """Создать объявление из типизированных моделей (текст и картинка).
+
+        :param campaign_id: ID кампании.
+        :param text: текстовая часть объявления (AdText).
+        :param image: картинка объявления (AdImage), если нужна.
+        :param ad_group_id: ID группы объявлений.
+        :param type_: тип объявления.
+        :return: элемент AddResults.
+        """
+        self._ensure_writable("create_with_payload")
+        body: Dict[str, Any] = {
+            "Type": type_,
+            "CampaignId": int(campaign_id),
+            "TextAd": text.to_payload(),
+        }
+        if ad_group_id is not None:
+            body["AdGroupId"] = int(ad_group_id)
+        if image is not None:
+            body["ImageAd"] = image.to_payload()
+        return self.create([body])[0]
 
     def update(self, ads: Sequence[Dict[str, Any]], *, confirm: bool = False) -> List[Dict[str, Any]]:
         """Обновить объявления (batch, до 200 за запрос).
