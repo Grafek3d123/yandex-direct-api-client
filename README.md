@@ -131,7 +131,6 @@ new = refresh_token(
 | `create(ads)` | Create ads (batch, up to 200) | **yes** |
 | `update(ads, confirm=False)` | Update ads (batch, up to 200) | **yes** |
 | `update_text(ad_id, headline, body)` | Update Title/Text of a text ad | **yes** |
-| `create_with_payload(campaign_id, text, image=None, ad_group_id=None)` | Create a text ad from typed models | **yes** |
 | `delete(ids, confirm=False)` | Delete ads by IDs | **yes** |
 
 ### `client.ad_groups`
@@ -140,27 +139,6 @@ new = refresh_token(
 |---|---|---|
 | `list(campaign_ids=None, ...)` | List ad groups (auto-paginated) | no |
 | `get(ids)` | Get ad groups by IDs | no |
-
-### `client.ad_group_items` (keywords)
-
-| Method | Description | Mutates? |
-|---|---|---|
-| `list(campaign_ids=None, ad_group_ids=None)` | List keywords (auto-paginated) | no |
-| `get(ids)` | Get keywords by IDs | no |
-| `add(items)` | Add keywords (typed `AdGroupItem` or raw dicts, up to 200) | **yes** |
-| `set_bid(item_id, bid)` | Set a single keyword bid | **yes** |
-| `set_bids(bids, confirm=False)` | Set keyword bids in bulk (up to 200) | **yes** |
-| `delete(ids, confirm=False)` | Delete keywords by IDs | **yes** |
-
-### `client.retargeting_adjustments`
-
-| Method | Description | Mutates? |
-|---|---|---|
-| `list(campaign_ids=None)` | List retargeting bid adjustments | no |
-| `get(ids)` | Get adjustments by IDs | no |
-| `add(adjustments)` | Add adjustments (typed model or dicts) | **yes** |
-| `update(adjustments, confirm=False)` | Bulk update adjustments | **yes** |
-| `delete(ids, confirm=False)` | Delete adjustments by IDs | **yes** |
 
 ### `client.reports`
 

@@ -8,12 +8,10 @@ import requests
 from ._transport import Transport
 from .config import DEFAULT_REPORT_TIMEOUT, Settings
 from .exceptions import ValidationError
-from .services.ad_group_items import AdGroupItemService
 from .services.ad_groups import AdGroupService
 from .services.ads import AdService
 from .services.campaigns import CampaignService
 from .services.reports import ReportService
-from .services.retargeting_adjustments import RetargetingAdjustmentService
 
 
 class YandexDirectClient:
@@ -25,7 +23,6 @@ class YandexDirectClient:
 
         campaigns = client.campaigns.list()
         ads = client.ads.list(campaign_ids=[123])
-        keywords = client.ad_group_items.list(campaign_ids=[123])
         stats = client.reports.get_ad_stats(ad_ids=[a.id for a in ads])
 
     :param token: OAuth access token. Если None — из env.
@@ -82,10 +79,6 @@ class YandexDirectClient:
         self._campaigns = CampaignService(self._transport, readonly=ro)
         self._ads = AdService(self._transport, readonly=ro)
         self._ad_groups = AdGroupService(self._transport)
-        self._ad_group_items = AdGroupItemService(self._transport, readonly=ro)
-        self._retargeting_adjustments = RetargetingAdjustmentService(
-            self._transport, readonly=ro
-        )
         self._reports = ReportService(self._transport)
 
     # -------- context manager --------
@@ -130,16 +123,6 @@ class YandexDirectClient:
     def ad_groups(self) -> AdGroupService:
         """Операции над группами объявлений."""
         return self._ad_groups
-
-    @property
-    def ad_group_items(self) -> AdGroupItemService:
-        """Операции над ключевыми фразами."""
-        return self._ad_group_items
-
-    @property
-    def retargeting_adjustments(self) -> RetargetingAdjustmentService:
-        """Операции над корректировками по ретаргетинг-сегментам."""
-        return self._retargeting_adjustments
 
     @property
     def reports(self) -> ReportService:
