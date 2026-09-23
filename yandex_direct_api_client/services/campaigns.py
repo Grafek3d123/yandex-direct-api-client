@@ -157,7 +157,7 @@ class CampaignService:
         for chunk in chunked(id_list, 200):
             payload: Dict[str, Any] = {
                 "method": "delete",
-                "params": {"Ids": list(chunk)},
+                "params": {"SelectionCriteria": {"Ids": list(chunk)}},
             }
             result = self._transport.post_result("campaigns", payload)
             for item in result.get("DeleteResults") or []:

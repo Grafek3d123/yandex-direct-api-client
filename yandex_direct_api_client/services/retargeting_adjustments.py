@@ -179,7 +179,7 @@ class RetargetingAdjustmentService:
         for chunk in chunked(id_list, MAX_MUTATE_IDS):
             payload: Dict[str, Any] = {
                 "method": "delete",
-                "params": {"Ids": list(chunk)},
+                "params": {"SelectionCriteria": {"Ids": list(chunk)}},
             }
             result = self._transport.post_result("retargetingadjustments", payload)
             for item in result.get("DeleteResults") or []:
