@@ -10,6 +10,37 @@ Typed, retry-aware Python client for [Yandex.Direct API v5](https://yandex.ru/de
 - **Paginated** — auto-follows `LimitedBy` to fetch all pages
 - **Namespaced** — `client.campaigns.list()`, `client.ads.update()`, `client.reports.get_ad_stats()`
 
+## Architecture & Scope
+
+This repository is a **pure capability layer** — a typed API client, nothing more:
+
+```text
+Private Orchestrator          ← business logic, strategy, user approval (NOT this repo)
+        ↓
+Yandex Direct Client          ← this repository
+        ↓
+Yandex Direct API v5
+```
+
+The client owns everything Direct-specific:
+
+- authentication (OAuth helpers) and HTTP transport (headers, request IDs, timeouts)
+- retry with `Retry-After`, token-bucket rate limiting, report polling (`201/202`)
+- pagination (`LimitedBy`), batch limits and chunking
+- typed request/response models (callers never touch raw Yandex JSON)
+- typed errors (`AuthError`, `RateLimitError`, `ApiError`, ...)
+- capability-level safety: `readonly=True` and `confirm=True` guards
+
+Explicitly **out of scope** (belongs to the orchestrator above):
+
+- advertising strategy, campaign optimization, budget decisions
+- user-facing approval workflows (the client's `confirm` is a programmatic
+  safety gate, not a business approval)
+- AI / LLM integration, MCP, natural language
+- Metrika client or any cross-capability code (report `goals` are plain
+  Direct API fields — correlating them with Metrika data is the orchestrator's job)
+- website changes, cross-system workflows
+
 ## Install
 
 ```bash
@@ -226,13 +257,21 @@ All inherit from `YandexDirectError` and carry the Yandex `request_id`
 | `rate_limit_rps` | `YANDEX_DIRECT_RATE_LIMIT_RPS` | `5` | Token-bucket rate |
 | `readonly` | `YANDEX_DIRECT_READONLY` | `False` | Block mutating methods |
 
-## Development
+## Tests
 
 ```bash
 pip install -e ".[dev]"
-pytest
+
+pytest                            # unit tests: mocked HTTP, no live API needed
 ruff check .
 mypy yandex_direct_api_client
+```
+
+Manual live checks (require a real token in `.env`, hit the real API):
+
+```bash
+python scripts/check_api.py               # readonly smoke over real campaigns
+python scripts/smoke_create_campaign.py   # full lifecycle: create → update → pause → delete
 ```
 
 ## License
