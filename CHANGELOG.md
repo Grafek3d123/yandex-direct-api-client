@@ -31,6 +31,48 @@ New safety semantics:
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-23
+
+### Added
+- **Track A — full lifecycle of existing resources:**
+  - `client.ad_groups` gained mutations: `create` (typed `AdGroup` or raw),
+    `update`, `delete` (requires `confirm=True`). Endpoint `adgroups/add|update|delete`.
+  - `client.campaigns` state management: `suspend`, `resume`, `archive`
+    (requires `confirm=True`), `unarchive`. Endpoints `campaigns/suspend|resume|archive|unarchive`.
+  - `client.ads` state management and moderation: `suspend`, `resume`,
+    `archive` (requires `confirm=True`), `unarchive`, `moderate`.
+    Endpoints `ads/suspend|resume|archive|unarchive|moderate`.
+  - `AdGroup.to_new_payload()` / `to_update_payload()`.
+- **Track B — new API resources:**
+  - `client.negative_keywords` service (API `negativekeywordsharedsets`):
+    `list`, `get`, `create`, `update`, `delete` (requires `confirm=True`).
+    Model `NegativeKeywordSharedSet`.
+  - `client.audience_targets` service (API `audiencetargets`): `list`, `get`,
+    `create`, `delete` (requires `confirm=True`), `suspend`, `resume`, `set_bids`.
+    Model `AudienceTarget`. (audiencetargets has no `update`; bids change via
+    `set_bids`.)
+  - `client.retargeting_conditions` service: `list`, `get`, `create`,
+    `delete` (requires `confirm=True`). Model `RetargetingCondition`. Wraps the
+    `audiencetargets` service (the standalone `retargetingconditions` endpoint is
+    not in the current v5 reference; retargeting is managed via
+    `audiencetargets` + `RetargetingListId`).
+  - `client.ad_extensions` service: `list_sitelinks`, `get_sitelinks`,
+    `create_sitelinks`, `delete_sitelinks` (API `sitelinks`) and
+    `list_callouts`, `get_callouts`, `create_callouts`, `delete_callouts`
+    (API `adextensions`, type CALLOUT). Models `Sitelink`, `SitelinksSet`, `Callout`.
+- New models: `NegativeKeywordSharedSet`, `AudienceTarget`,
+  `RetargetingCondition`, `Sitelink`, `SitelinksSet`, `Callout`.
+- 51 new tests (Track A: 23, Track B: 28): request construction, response
+  parsing, item-level errors, `confirm`/`readonly` guards, typed/raw payloads.
+
+### Fixed
+- `AdGroup` model: field is `NegativeKeywordSharedSetIds` (singular) and it is
+  an `ArrayOfLong` (`{Items: [...]}`) — `from_dict` now unwraps the `Items`
+  wrapper and `to_new_payload` emits it. Previously used a wrong field name and
+  a bare list.
+- `client.ad_groups` service is now constructed with `readonly=ro`, so its
+  mutations are correctly blocked in readonly mode (was wired without the flag).
+
 ## [0.4.1] - 2026-09-22
 
 ### Changed

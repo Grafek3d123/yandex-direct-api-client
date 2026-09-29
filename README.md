@@ -152,6 +152,10 @@ new = refresh_token(
 | `create(campaign)` | Create a campaign | **yes** |
 | `update(campaign)` | Update a campaign | **yes** |
 | `delete(ids, confirm=False)` | Delete campaigns by IDs | **yes** |
+| `suspend(ids)` | Stop campaign serving | **yes** |
+| `resume(ids)` | Resume campaign serving | **yes** |
+| `archive(ids, confirm=False)` | Move campaigns to archive | **yes** |
+| `unarchive(ids)` | Restore campaigns from archive | **yes** |
 
 ### `client.ads`
 
@@ -164,6 +168,11 @@ new = refresh_token(
 | `update_text(ad_id, headline, body)` | Update Title/Text of a text ad | **yes** |
 | `create_with_payload(campaign_id, text, image=None, ad_group_id=None)` | Create a text ad from typed models | **yes** |
 | `delete(ids, confirm=False)` | Delete ads by IDs | **yes** |
+| `suspend(ids)` | Stop ad serving | **yes** |
+| `resume(ids)` | Resume ad serving | **yes** |
+| `archive(ids, confirm=False)` | Move ads to archive | **yes** |
+| `unarchive(ids)` | Restore ads from archive | **yes** |
+| `moderate(ids)` | Submit DRAFT ads for moderation | **yes** |
 
 ### `client.ad_groups`
 
@@ -171,6 +180,9 @@ new = refresh_token(
 |---|---|---|
 | `list(campaign_ids=None, ...)` | List ad groups (auto-paginated) | no |
 | `get(ids)` | Get ad groups by IDs | no |
+| `create(ad_groups)` | Create ad groups (typed `AdGroup` or raw dicts, up to 200) | **yes** |
+| `update(ad_groups)` | Update ad groups (typed model with `Id` or dicts) | **yes** |
+| `delete(ids, confirm=False)` | Delete ad groups by IDs | **yes** |
 
 ### `client.ad_group_items` (keywords)
 
@@ -192,6 +204,61 @@ new = refresh_token(
 | `add(adjustments)` | Add adjustments (typed model or dicts) | **yes** |
 | `update(adjustments, confirm=False)` | Bulk update adjustments | **yes** |
 | `delete(ids, confirm=False)` | Delete adjustments by IDs | **yes** |
+
+### `client.negative_keywords` (API `negativekeywordsharedsets`)
+
+Shared negative-keyword sets. Bind a set to an ad group via
+`AdGroup.NegativeKeywordSharedSetIds` through `client.ad_groups.update()`.
+
+| Method | Description | Mutates? |
+|---|---|---|
+| `list()` | List all negative-keyword sets (auto-paginated) | no |
+| `get(ids)` | Get sets by IDs (chunked by 30) | no |
+| `create(sets)` | Create sets (typed `NegativeKeywordSharedSet` or dicts, up to 30) | **yes** |
+| `update(sets)` | Update sets (typed model with `Id` or dicts) | **yes** |
+| `delete(ids, confirm=False)` | Delete sets by IDs | **yes** |
+
+### `client.audience_targets` (API `audiencetargets`)
+
+| Method | Description | Mutates? |
+|---|---|---|
+| `list(campaign_ids=None, ad_group_ids=None, states=None)` | List audience targets (auto-paginated) | no |
+| `get(ids)` | Get targets by IDs | no |
+| `create(targets)` | Create targets (typed `AudienceTarget` or dicts) | **yes** |
+| `suspend(ids)` | Stop target serving | **yes** |
+| `resume(ids)` | Resume target serving | **yes** |
+| `set_bids(bids)` | Set bids/priorities (audiencetargets has no `update`) | **yes** |
+| `delete(ids, confirm=False)` | Delete targets by IDs | **yes** |
+
+### `client.retargeting_conditions`
+
+Retargeting conditions. The standalone `retargetingconditions` endpoint is not
+in the current v5 reference — retargeting is managed via `audiencetargets`
+(`RetargetingListId`), and this service wraps that. Not to be confused with
+`retargeting_adjustments` (bid adjustments).
+
+| Method | Description | Mutates? |
+|---|---|---|
+| `list(campaign_ids=None, ad_group_ids=None, retargeting_list_ids=None)` | List conditions (auto-paginated) | no |
+| `get(ids)` | Get conditions by IDs | no |
+| `create(conditions)` | Create conditions (typed `RetargetingCondition` or dicts) | **yes** |
+| `delete(ids, confirm=False)` | Delete conditions by IDs | **yes** |
+
+### `client.ad_extensions` (API `sitelinks`, `adextensions`)
+
+Sitelinks (`SitelinksSet`/`Sitelink`) and callouts (`Callout`, type CALLOUT).
+Update = create + delete (per API semantics).
+
+| Method | Description | Mutates? |
+|---|---|---|
+| `list_sitelinks()` | List sitelink sets (auto-paginated) | no |
+| `get_sitelinks(ids)` | Get sitelink sets by IDs | no |
+| `create_sitelinks(sets)` | Create sitelink sets (typed `SitelinksSet` or dicts) | **yes** |
+| `delete_sitelinks(ids, confirm=False)` | Delete sitelink sets by IDs | **yes** |
+| `list_callouts()` | List callouts (auto-paginated) | no |
+| `get_callouts(ids)` | Get callouts by IDs | no |
+| `create_callouts(callouts)` | Create callouts (typed `Callout` or dicts) | **yes** |
+| `delete_callouts(ids, confirm=False)` | Delete callouts by IDs | **yes** |
 
 ### `client.reports`
 
