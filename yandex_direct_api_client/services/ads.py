@@ -242,5 +242,94 @@ class AdService:
                 results.append(item)
         return results
 
+    def _state_action(
+        self,
+        method_name: str,
+        result_key: str,
+        action_label: str,
+        ids: Sequence[int],
+    ) -> List[Dict[str, Any]]:
+        """Общий batch-вызов метода управления состоянием/модерацией.
+
+        :param method_name: имя метода API (suspend/resume/archive/...).
+        :param result_key: ключ списка результатов в ответе.
+        :param action_label: описание действия для сообщений об ошибках.
+        :param ids: список ID объявлений.
+        :return: список элементов ActionResult.
+        """
+        self._ensure_writable(method_name)
+        id_list = list(ids)
+        if not id_list:
+            return []
+        results: List[Dict[str, Any]] = []
+        for chunk in chunked(id_list, MAX_MUTATE_IDS):
+            payload: Dict[str, Any] = {
+                "method": method_name,
+                "params": {"SelectionCriteria": {"Ids": list(chunk)}},
+            }
+            result = self._transport.post_result("ads", payload)
+            for item in result.get(result_key) or []:
+                check_item_errors(
+                    item, f"{action_label} объявления id={item.get('Id')}"
+                )
+                results.append(item)
+        return results
+
+    def suspend(self, ids: Sequence[int]) -> List[Dict[str, Any]]:
+        """Остановить показы объявлений (ads/suspend).
+
+        :param ids: список ID объявлений.
+        :return: список элементов SuspendResults.
+        """
+        return self._state_action(
+            "suspend", "SuspendResults", "остановки", ids
+        )
+
+    def resume(self, ids: Sequence[int]) -> List[Dict[str, Any]]:
+        """Возобновить показы объявлений (ads/resume).
+
+        :param ids: список ID объявлений.
+        :return: список элементов ResumeResults.
+        """
+        return self._state_action(
+            "resume", "ResumeResults", "возобновления", ids
+        )
+
+    def archive(
+        self, ids: Sequence[int], *, confirm: bool = False
+    ) -> List[Dict[str, Any]]:
+        """Разместить объявления в архив (ads/archive).
+
+        :param ids: список ID объявлений.
+        :param confirm: явное подтверждение массового изменения.
+        :return: список элементов ArchiveResults.
+        """
+        ensure_confirmed("ads.archive", confirm)
+        return self._state_action(
+            "archive", "ArchiveResults", "архивации", ids
+        )
+
+    def unarchive(self, ids: Sequence[int]) -> List[Dict[str, Any]]:
+        """Разархивировать объявления (ads/unarchive).
+
+        :param ids: список ID объявлений.
+        :return: список элементов UnarchiveResults.
+        """
+        return self._state_action(
+            "unarchive", "UnarchiveResults", "разархивации", ids
+        )
+
+    def moderate(self, ids: Sequence[int]) -> List[Dict[str, Any]]:
+        """Отправить объявления на модерацию (ads/moderate).
+
+        Отправить можно только объявления со статусом DRAFT.
+
+        :param ids: список ID объявлений.
+        :return: список элементов ModerateResults.
+        """
+        return self._state_action(
+            "moderate", "ModerateResults", "отправки на модерацию", ids
+        )
+
 
 __all__ = ["AdService"]

@@ -2,9 +2,33 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from ._helpers import to_int, to_optional_int, to_str
+
+
+def _to_int_list(value: Any) -> Optional[List[int]]:
+    if value is None or not isinstance(value, (list, tuple)):
+        return None
+    result: List[int] = []
+    for item in value:
+        parsed = to_optional_int(item)
+        if parsed is not None:
+            result.append(parsed)
+    return result
+
+
+def _to_items_int_list(value: Any) -> Optional[List[int]]:
+    """Разобрать ArrayOfLong ({Items: [...]}) либо обычный массив в список int.
+
+    В ответе adgroups/get поле NegativeKeywordSharedSetIds приходит как
+    структура ArrayOfLong с ключом Items, а RegionIds — обычным массивом.
+    """
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        value = value.get("Items")
+    return _to_int_list(value)
 
 
 @dataclass
@@ -17,6 +41,8 @@ class AdGroup:
     status: Optional[str] = None
     state: Optional[str] = None
     type: Optional[str] = None
+    region_ids: Optional[List[int]] = None
+    negative_keywords_shared_set_ids: Optional[List[int]] = None
     raw: Dict[str, Any] = field(default_factory=dict, repr=False)
 
     @classmethod
@@ -28,8 +54,34 @@ class AdGroup:
             status=d.get("Status"),
             state=d.get("State"),
             type=d.get("Type"),
+            region_ids=_to_int_list(d.get("RegionIds")),
+            negative_keywords_shared_set_ids=_to_items_int_list(
+                d.get("NegativeKeywordSharedSetIds")
+            ),
             raw=d,
         )
+
+    def to_new_payload(self) -> Dict[str, Any]:
+        """Тело для adgroups/add (AdGroupNew)."""
+        body: Dict[str, Any] = {}
+        if self.campaign_id is not None:
+            body["CampaignId"] = self.campaign_id
+        if self.name:
+            body["Name"] = self.name
+        if self.region_ids:
+            body["RegionIds"] = list(self.region_ids)
+        if self.negative_keywords_shared_set_ids:
+            body["NegativeKeywordSharedSetIds"] = {
+                "Items": list(self.negative_keywords_shared_set_ids)
+            }
+        return body
+
+    def to_update_payload(self) -> Dict[str, Any]:
+        """Тело для adgroups/update: new-поля + Id."""
+        body = self.to_new_payload()
+        if self.id:
+            body["Id"] = self.id
+        return body
 
 
 __all__ = ["AdGroup"]

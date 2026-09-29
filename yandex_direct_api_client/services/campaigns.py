@@ -25,6 +25,9 @@ _DEFAULT_FIELDS = [
     "EndDate",
 ]
 
+# campaigns/suspend|resume|archive|unarchive — не более 1000 Ids за вызов
+_MAX_STATE_IDS = 1000
+
 
 class CampaignService:
     """Операции над кампаниями Yandex.Direct."""
@@ -164,6 +167,83 @@ class CampaignService:
                 check_item_errors(item, f"удаления кампании id={item.get('Id')}")
                 results.append(item)
         return results
+
+    def _state_action(
+        self,
+        method_name: str,
+        result_key: str,
+        action_label: str,
+        ids: Sequence[int],
+    ) -> List[Dict[str, Any]]:
+        """Общий batch-вызов метода управления состоянием по SelectionCriteria.Ids.
+
+        :param method_name: имя метода API (suspend/resume/archive/unarchive).
+        :param result_key: ключ списка результатов в ответе.
+        :param action_label: описание действия для сообщений об ошибках.
+        :param ids: список ID кампаний.
+        :return: список элементов ActionResult.
+        """
+        self._ensure_writable(method_name)
+        id_list = list(ids)
+        if not id_list:
+            return []
+        results: List[Dict[str, Any]] = []
+        for chunk in chunked(id_list, _MAX_STATE_IDS):
+            payload: Dict[str, Any] = {
+                "method": method_name,
+                "params": {"SelectionCriteria": {"Ids": list(chunk)}},
+            }
+            result = self._transport.post_result("campaigns", payload)
+            for item in result.get(result_key) or []:
+                check_item_errors(
+                    item, f"{action_label} кампании id={item.get('Id')}"
+                )
+                results.append(item)
+        return results
+
+    def suspend(self, ids: Sequence[int]) -> List[Dict[str, Any]]:
+        """Остановить показы кампаний (campaigns/suspend, до 1000 за запрос).
+
+        :param ids: список ID кампаний.
+        :return: список элементов SuspendResults.
+        """
+        return self._state_action(
+            "suspend", "SuspendResults", "остановки", ids
+        )
+
+    def resume(self, ids: Sequence[int]) -> List[Dict[str, Any]]:
+        """Возобновить показы кампаний (campaigns/resume, до 1000 за запрос).
+
+        :param ids: список ID кампаний.
+        :return: список элементов ResumeResults.
+        """
+        return self._state_action(
+            "resume", "ResumeResults", "возобновления", ids
+        )
+
+    def archive(
+        self, ids: Sequence[int], *, confirm: bool = False
+    ) -> List[Dict[str, Any]]:
+        """Разместить кампании в архив (campaigns/archive, до 1000 за запрос).
+
+        :param ids: список ID кампаний.
+        :param confirm: явное подтверждение массового изменения.
+        :return: список элементов ArchiveResults.
+        """
+        ensure_confirmed("campaigns.archive", confirm)
+        return self._state_action(
+            "archive", "ArchiveResults", "архивации", ids
+        )
+
+    def unarchive(self, ids: Sequence[int]) -> List[Dict[str, Any]]:
+        """Разархивировать кампании (campaigns/unarchive, до 1000 за запрос).
+
+        :param ids: список ID кампаний.
+        :return: список элементов UnarchiveResults.
+        """
+        return self._state_action(
+            "unarchive", "UnarchiveResults", "разархивации", ids
+        )
 
 
 __all__ = ["CampaignService"]
