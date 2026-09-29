@@ -141,21 +141,28 @@ class AdService:
     ) -> Dict[str, Any]:
         """Создать объявление из типизированных моделей (текст и картинка).
 
-        :param campaign_id: ID кампании.
+        :param campaign_id: ID кампании. Принимается для совместимости, но
+            НЕ отправляется: ads/add не принимает CampaignId — кампания
+            объявления выводится из группы (AdGroupId).
         :param text: текстовая часть объявления (AdText).
         :param image: картинка объявления (AdImage), если нужна.
-        :param ad_group_id: ID группы объявлений.
-        :param type_: тип объявления.
+        :param ad_group_id: ID группы объявлений — обязателен (ads/add
+            требует AdGroupId).
+        :param type_: принимается для совместимости, но НЕ отправляется:
+            ads/add не принимает Type — тип выводится из переданных
+            TextAd/ImageAd.
         :return: элемент AddResults.
         """
         self._ensure_writable("create_with_payload")
+        if ad_group_id is None:
+            raise ValidationError(
+                "ads/add требует AdGroupId — кампания выводится из группы; "
+                "передайте ad_group_id"
+            )
         body: Dict[str, Any] = {
-            "Type": type_,
-            "CampaignId": int(campaign_id),
+            "AdGroupId": int(ad_group_id),
             "TextAd": text.to_payload(),
         }
-        if ad_group_id is not None:
-            body["AdGroupId"] = int(ad_group_id)
         if image is not None:
             body["ImageAd"] = image.to_payload()
         return self.create([body])[0]

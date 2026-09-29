@@ -64,6 +64,11 @@ New safety semantics:
   `RetargetingCondition`, `Sitelink`, `SitelinksSet`, `Callout`.
 - 51 new tests (Track A: 23, Track B: 28): request construction, response
   parsing, item-level errors, `confirm`/`readonly` guards, typed/raw payloads.
+- 5 regression tests from the live-account run (see below): `ad_groups`
+  `list`/`get` field/criteria contracts and guards.
+- `scripts/smoke_task03_live.py` — permanent live smoke over a real account
+  (campaign + groups + ads lifecycle); creates a DRAFT campaign starting
+  tomorrow and deletes everything it creates. Not part of pytest.
 
 ### Fixed
 - `AdGroup` model: field is `NegativeKeywordSharedSetIds` (singular) and it is
@@ -72,6 +77,24 @@ New safety semantics:
   a bare list.
 - `client.ad_groups` service is now constructed with `readonly=ro`, so its
   mutations are correctly blocked in readonly mode (was wired without the flag).
+- **Request-contract bugs found only against the live API (mocks could not
+  catch them):**
+  - `adgroups/get` requested a non-existent `State` field (ad groups have only
+    `Status`/`ServingStatus`) → API error 8000 "Not able to process JSON/XML".
+    Removed from `_DEFAULT_FIELDS`; `ad_groups.list`/`get` now send valid fields.
+  - `ad_groups.list()` without `campaign_ids` produced an empty
+    `SelectionCriteria` → API "filtration parameters incorrectly set". Now raises
+    a clear client-side `ValidationError` (adgroups/get requires `CampaignIds`/`Ids`).
+  - `ad_groups.list(states=…)` sent invalid `SelectionCriteria.States`; replaced
+    with valid `statuses`/`serving_statuses` filters.
+  - `AdGroup.to_update_payload()` sent `CampaignId`, which `adgroups/update`
+    rejects (error 8000 "unknown parameter CampaignId"). No longer sent on update.
+  - `ads.create_with_payload()` sent `CampaignId` and `Type`, both rejected by
+    `ads/add` (error 8000 "unknown parameter …"). The ad's campaign is derived
+    from `AdGroupId` (now required) and its type from the `TextAd`/`ImageAd`
+    object. `campaign_id`/`type_` params are kept for compatibility but not sent.
+  - Updated two existing tests that had codified the buggy payloads
+    (`test_ads_create_with_payload`).
 
 ## [0.4.1] - 2026-09-22
 

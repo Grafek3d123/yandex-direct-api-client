@@ -345,7 +345,9 @@ def test_ads_create_with_payload(client: YandexDirectClient) -> None:
     assert res["Id"] == 123
     payload = _body_of(responses.calls[0])
     sent = payload["params"]["Ads"][0]
-    assert sent["CampaignId"] == 10
+    # ads/add НЕ принимает CampaignId и Type (выводятся из группы/под-объектов)
+    assert "CampaignId" not in sent
+    assert "Type" not in sent
     assert sent["AdGroupId"] == 20
     assert sent["TextAd"]["Title"] == "T"
     assert sent["ImageAd"]["ImageId"] == "img-1"

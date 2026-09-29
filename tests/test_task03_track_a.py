@@ -45,6 +45,8 @@ def test_adgroup_to_update_payload_has_id() -> None:
     body = g.to_update_payload()
     assert body["Id"] == 55
     assert body["RegionIds"] == [0]
+    # adgroups/update не принимает CampaignId (иначе ошибка 8000)
+    assert "CampaignId" not in body
 
 
 def test_adgroup_from_dict_unwraps_items() -> None:
@@ -136,6 +138,7 @@ def test_ad_groups_update_typed(client: YandexDirectClient) -> None:
     sent = payload["params"]["AdGroups"][0]
     assert sent["Id"] == 100
     assert sent["Name"] == "renamed"
+    assert "CampaignId" not in sent  # live-баг: update не принимает CampaignId
 
 
 # ---------- ad_groups.delete ----------
@@ -157,6 +160,83 @@ def test_ad_groups_delete(client: YandexDirectClient) -> None:
 def test_ad_groups_delete_requires_confirm(client: YandexDirectClient) -> None:
     with pytest.raises(ValidationError):
         client.ad_groups.delete([1])
+    assert len(responses.calls) == 0
+
+
+# ---------- ad_groups.list / get (регресс живого теста) ----------
+@responses.activate
+def test_ad_groups_list_fieldnames_have_no_state(client: YandexDirectClient) -> None:
+    """У группы НЕТ поля State — его запрос давал 8000 на живом API."""
+    responses.add(
+        responses.POST,
+        ADGROUPS_URL,
+        json={
+            "result": {
+                "AdGroups": [
+                    {
+                        "Id": 1,
+                        "Name": "g1",
+                        "CampaignId": 10,
+                        "Status": "ACCEPTED",
+                        "Type": "TEXT_AD_GROUP",
+                        "RegionIds": [225],
+                    }
+                ]
+            }
+        },
+        status=200,
+    )
+    groups = client.ad_groups.list(campaign_ids=[10])
+    assert groups[0].id == 1
+    assert groups[0].region_ids == [225]
+    payload = _body_of(responses.calls[0])
+    assert payload["method"] == "get"
+    fields = payload["params"]["FieldNames"]
+    assert "State" not in fields
+    assert "RegionIds" in fields
+
+
+@responses.activate
+def test_ad_groups_list_criteria_valid(client: YandexDirectClient) -> None:
+    responses.add(
+        responses.POST, ADGROUPS_URL, json={"result": {"AdGroups": []}}, status=200
+    )
+    client.ad_groups.list(
+        campaign_ids=[10], statuses=["DRAFT"], serving_statuses=["ELIGIBLE"]
+    )
+    payload = _body_of(responses.calls[0])
+    crit = payload["params"]["SelectionCriteria"]
+    assert crit["CampaignIds"] == [10]
+    assert crit["Statuses"] == ["DRAFT"]
+    assert crit["ServingStatuses"] == ["ELIGIBLE"]
+    assert "States" not in crit  # у adgroups нет SelectionCriteria.States
+
+
+@responses.activate
+def test_ad_groups_get_by_ids(client: YandexDirectClient) -> None:
+    responses.add(
+        responses.POST,
+        ADGROUPS_URL,
+        json={
+            "result": {
+                "AdGroups": [
+                    {"Id": 5, "Name": "g", "CampaignId": 10, "Status": "DRAFT"}
+                ]
+            }
+        },
+        status=200,
+    )
+    groups = client.ad_groups.get([5])
+    assert groups[0].id == 5
+    payload = _body_of(responses.calls[0])
+    assert payload["params"]["SelectionCriteria"]["Ids"] == [5]
+    assert "State" not in payload["params"]["FieldNames"]
+
+
+def test_ad_groups_list_requires_campaign_ids(client: YandexDirectClient) -> None:
+    """adgroups/get требует CampaignIds/Ids — list() без фильтра отклоняется."""
+    with pytest.raises(ValidationError):
+        client.ad_groups.list()
     assert len(responses.calls) == 0
 
 

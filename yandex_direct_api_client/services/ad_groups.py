@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
 
 from .._transport import Transport
+from ..exceptions import ValidationError
 from ..models.ad_group import AdGroup
 from ._base import (
     MAX_MUTATE_IDS,
@@ -14,7 +15,9 @@ from ._base import (
     fetch_all_pages,
 )
 
-_DEFAULT_FIELDS = ["Id", "CampaignId", "Name", "Status", "State"]
+# Валидные имена полей для adgroups/get (AdGroupFieldEnum). У группы НЕТ поля
+# State — только Status и ServingStatus (в отличие от кампаний/объявлений).
+_DEFAULT_FIELDS = ["Id", "Name", "CampaignId", "Status", "Type", "RegionIds"]
 
 AdGroupInput = Union[AdGroup, Mapping[str, Any]]
 
@@ -33,24 +36,35 @@ class AdGroupService:
         self,
         *,
         campaign_ids: Optional[Sequence[int]] = None,
-        states: Optional[Sequence[str]] = None,
         statuses: Optional[Sequence[str]] = None,
+        serving_statuses: Optional[Sequence[str]] = None,
         page_limit: int = 10000,
     ) -> List[AdGroup]:
         """Список групп объявлений с авто-пагинацией.
 
         :param campaign_ids: фильтр по ID кампаний.
-        :param states: фильтр по State.
-        :param statuses: фильтр по Status.
+        :param statuses: фильтр по Status (DRAFT/ACCEPTED/MODERATION/...).
+        :param serving_statuses: фильтр по ServingStatus (ELIGIBLE/
+            RARELY_SERVED). У группы нет поля State, поэтому фильтра по
+            State нет — см. официальный справочник adgroups/get.
         :param page_limit: размер страницы.
         """
         criteria: Dict[str, Any] = {}
         if campaign_ids:
             criteria["CampaignIds"] = list(campaign_ids)
-        if states:
-            criteria["States"] = list(states)
         if statuses:
             criteria["Statuses"] = list(statuses)
+        if serving_statuses:
+            criteria["ServingStatuses"] = list(serving_statuses)
+        # AdGroupsSelectionCriteria требует хотя бы один из CampaignIds/Ids
+        # (см. официальный справочник adgroups/get). list() не принимает Ids,
+        # поэтому обязателен campaign_ids — иначе API вернёт
+        # "filtration parameters incorrectly set".
+        if not campaign_ids:
+            raise ValidationError(
+                "adgroups/get требует фильтр CampaignIds (или Ids через get()); "
+                "вызов ad_groups.list() без campaign_ids невозможен"
+            )
 
         payload: Dict[str, Any] = {
             "method": "get",

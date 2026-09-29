@@ -166,7 +166,7 @@ new = refresh_token(
 | `create(ads)` | Create ads (batch, up to 200) | **yes** |
 | `update(ads, confirm=False)` | Update ads (batch, up to 200) | **yes** |
 | `update_text(ad_id, headline, body)` | Update Title/Text of a text ad | **yes** |
-| `create_with_payload(campaign_id, text, image=None, ad_group_id=None)` | Create a text ad from typed models | **yes** |
+| `create_with_payload(campaign_id, text, image=None, ad_group_id=None)` | Create a text ad from typed models (`ad_group_id` required; the ad's campaign is derived from its group) | **yes** |
 | `delete(ids, confirm=False)` | Delete ads by IDs | **yes** |
 | `suspend(ids)` | Stop ad serving | **yes** |
 | `resume(ids)` | Resume ad serving | **yes** |
@@ -178,10 +178,10 @@ new = refresh_token(
 
 | Method | Description | Mutates? |
 |---|---|---|
-| `list(campaign_ids=None, ...)` | List ad groups (auto-paginated) | no |
+| `list(campaign_ids, statuses=None, serving_statuses=None)` | List ad groups (auto-paginated; `campaign_ids` required — adgroups/get needs a `CampaignIds`/`Ids` filter) | no |
 | `get(ids)` | Get ad groups by IDs | no |
-| `create(ad_groups)` | Create ad groups (typed `AdGroup` or raw dicts, up to 200) | **yes** |
-| `update(ad_groups)` | Update ad groups (typed model with `Id` or dicts) | **yes** |
+| `create(ad_groups)` | Create ad groups (typed `AdGroup` or raw dicts, up to 200; needs real `RegionIds`, `[0]` is rejected) | **yes** |
+| `update(ad_groups)` | Update ad groups (typed model with `Id` or dicts; `CampaignId` is not sent) | **yes** |
 | `delete(ids, confirm=False)` | Delete ad groups by IDs | **yes** |
 
 ### `client.ad_group_items` (keywords)
@@ -339,6 +339,7 @@ Manual live checks (require a real token in `.env`, hit the real API):
 ```bash
 python scripts/check_api.py               # readonly smoke over real campaigns
 python scripts/smoke_create_campaign.py   # full lifecycle: create → update → pause → delete
+python scripts/smoke_task03_live.py       # Track A live: ad_groups CRUD + campaigns/ads lifecycle (self-cleaning)
 ```
 
 ## License

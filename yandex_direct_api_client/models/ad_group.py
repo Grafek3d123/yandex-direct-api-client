@@ -77,8 +77,21 @@ class AdGroup:
         return body
 
     def to_update_payload(self) -> Dict[str, Any]:
-        """Тело для adgroups/update: new-поля + Id."""
-        body = self.to_new_payload()
+        """Тело для adgroups/update: Id + изменяемые поля.
+
+        CampaignId НЕ включается — adgroups/update не принимает это поле
+        (кампанию группы изменить нельзя); иначе API отдаёт ошибку 8000
+        "unknown parameter CampaignId".
+        """
+        body: Dict[str, Any] = {}
+        if self.name:
+            body["Name"] = self.name
+        if self.region_ids:
+            body["RegionIds"] = list(self.region_ids)
+        if self.negative_keywords_shared_set_ids:
+            body["NegativeKeywordSharedSetIds"] = {
+                "Items": list(self.negative_keywords_shared_set_ids)
+            }
         if self.id:
             body["Id"] = self.id
         return body
