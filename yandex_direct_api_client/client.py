@@ -8,12 +8,16 @@ import requests
 from ._transport import Transport
 from .config import DEFAULT_REPORT_TIMEOUT, Settings
 from .exceptions import ValidationError
+from .services.ad_extensions import AdExtensionService
 from .services.ad_group_items import AdGroupItemService
 from .services.ad_groups import AdGroupService
 from .services.ads import AdService
+from .services.audience_targets import AudienceTargetService
 from .services.campaigns import CampaignService
+from .services.negative_keywords import NegativeKeywordService
 from .services.reports import ReportService
 from .services.retargeting_adjustments import RetargetingAdjustmentService
+from .services.retargeting_conditions import RetargetingConditionService
 
 
 class YandexDirectClient:
@@ -81,11 +85,21 @@ class YandexDirectClient:
         ro = self._settings.readonly
         self._campaigns = CampaignService(self._transport, readonly=ro)
         self._ads = AdService(self._transport, readonly=ro)
-        self._ad_groups = AdGroupService(self._transport)
+        self._ad_groups = AdGroupService(self._transport, readonly=ro)
         self._ad_group_items = AdGroupItemService(self._transport, readonly=ro)
         self._retargeting_adjustments = RetargetingAdjustmentService(
             self._transport, readonly=ro
         )
+        self._negative_keywords = NegativeKeywordService(
+            self._transport, readonly=ro
+        )
+        self._audience_targets = AudienceTargetService(
+            self._transport, readonly=ro
+        )
+        self._retargeting_conditions = RetargetingConditionService(
+            self._transport, readonly=ro
+        )
+        self._ad_extensions = AdExtensionService(self._transport, readonly=ro)
         self._reports = ReportService(self._transport)
 
     # -------- context manager --------
@@ -140,6 +154,26 @@ class YandexDirectClient:
     def retargeting_adjustments(self) -> RetargetingAdjustmentService:
         """Операции над корректировками по ретаргетинг-сегментам."""
         return self._retargeting_adjustments
+
+    @property
+    def negative_keywords(self) -> NegativeKeywordService:
+        """Операции над наборами минус-фраз (NegativeKeywordSharedSets)."""
+        return self._negative_keywords
+
+    @property
+    def audience_targets(self) -> AudienceTargetService:
+        """Операции над условиями нацеливания на аудиторию."""
+        return self._audience_targets
+
+    @property
+    def retargeting_conditions(self) -> RetargetingConditionService:
+        """Операции над условиями ретаргетинга (через API audiencetargets)."""
+        return self._retargeting_conditions
+
+    @property
+    def ad_extensions(self) -> AdExtensionService:
+        """Операции над расширениями объявлений (быстрые ссылки, уточнения)."""
+        return self._ad_extensions
 
     @property
     def reports(self) -> ReportService:
