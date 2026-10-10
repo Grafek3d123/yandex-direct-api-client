@@ -415,22 +415,20 @@ def scenario_report(client: YandexDirectClient, args: argparse.Namespace) -> Non
         date_range_type="ALL_TIME",
         field_names=[
             "CampaignId",
-            "Date",
             "Impressions",
             "Clicks",
+            "Cost",
             "Ctr",
-            "Cpm",
         ],
     )
     _require(report.rows, stage, "строки отчёта")
     for row in report.rows[:5]:
         logger.info(
-            "S-05 дата=%s показы=%s клики=%s CTR=%s CPM=%s",
-            row.as_date(),
+            "S-05 показы=%s клики=%s CTR=%s стоимость=%s",
             row.as_int("Impressions"),
             row.as_int("Clicks"),
             row.as_float("Ctr"),
-            row.as_money("Cpm"),
+            row.as_money("Cost"),
         )
     logger.info("S-05 строк отчёта: %d запрос=%s", len(report.rows), _request_id(client))
 
