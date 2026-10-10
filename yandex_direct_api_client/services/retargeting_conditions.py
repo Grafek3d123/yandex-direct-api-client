@@ -17,18 +17,31 @@ https://yandex.ru/dev/direct/doc/en/objects/audience-target
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
+from typing import (
+    Any,
+    Dict,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Sequence,
+    Union,
+    overload,
+)
 
 from .._transport import Transport
+from ..limits import AUDIENCE_TARGETS_GET_MAX, GET_PAGE_MAX
+from ..models.batch import BatchResult
 from ..models.retargeting_condition import RetargetingCondition
+from ..validation import Validator
 from ._base import (
-    MAX_GET_IDS,
-    MAX_MUTATE_IDS,
-    check_item_errors,
+    OnItemError,
     chunked,
+    empty_result,
     ensure_confirmed,
     ensure_writable,
     fetch_all_pages,
+    run_batches,
 )
 
 _DEFAULT_FIELDS = [
@@ -54,13 +67,16 @@ class RetargetingConditionService:
     def _ensure_writable(self, method_name: str) -> None:
         ensure_writable("retargeting_conditions", method_name, self._readonly)
 
+    def _validator(self) -> Validator:
+        return Validator(self._transport.validate_enabled)
+
     def list(
         self,
         *,
         campaign_ids: Optional[Sequence[int]] = None,
         ad_group_ids: Optional[Sequence[int]] = None,
         retargeting_list_ids: Optional[Sequence[int]] = None,
-        page_limit: int = 10000,
+        page_limit: int = GET_PAGE_MAX,
     ) -> List[RetargetingCondition]:
         """Список условий ретаргетинга с авто-пагинацией.
 
@@ -102,9 +118,10 @@ class RetargetingConditionService:
         """
         if not ids:
             return []
+        self._validator().ids(ids, field="Ids")
         fields = list(field_names) if field_names else list(_DEFAULT_FIELDS)
         results: List[RetargetingCondition] = []
-        for chunk in chunked(list(ids), MAX_GET_IDS):
+        for chunk in chunked(list(ids), AUDIENCE_TARGETS_GET_MAX):
             payload: Dict[str, Any] = {
                 "method": "get",
                 "params": {
@@ -117,62 +134,96 @@ class RetargetingConditionService:
                 results.append(RetargetingCondition.from_dict(raw))
         return results
 
+    @overload
     def create(
-        self, conditions: Sequence[RetargetingConditionInput]
-    ) -> List[Dict[str, Any]]:
+        self,
+        conditions: Sequence[RetargetingConditionInput],
+        *,
+        on_item_error: Literal["raise"] = ...,
+    ) -> List[Dict[str, Any]]: ...
+
+    @overload
+    def create(
+        self,
+        conditions: Sequence[RetargetingConditionInput],
+        *,
+        on_item_error: Literal["collect"],
+    ) -> BatchResult: ...
+
+    def create(
+        self,
+        conditions: Sequence[RetargetingConditionInput],
+        *,
+        on_item_error: OnItemError = "raise",
+    ) -> Union[List[Dict[str, Any]], BatchResult]:
         """Создать условия ретаргетинга (audiencetargets/add, до 200 за запрос).
 
         :param conditions: типизированные модели или тела AudienceTargetAddItem.
-        :return: список элементов AddResults.
+        :param on_item_error: `raise` или `collect` (см. `ads.create`).
+        :return: список элементов AddResults (или `BatchResult`).
         """
         self._ensure_writable("create")
         body_list = [_new_body(x) for x in conditions]
-        if not body_list:
-            return []
-        results: List[Dict[str, Any]] = []
-        for chunk in chunked(body_list, MAX_MUTATE_IDS):
-            payload: Dict[str, Any] = {
-                "method": "add",
-                "params": {"AudienceTargets": list(chunk)},
-            }
-            result = self._transport.post_result("audiencetargets", payload)
-            for item in result.get("AddResults") or []:
-                check_item_errors(
-                    item, f"создания условия ретаргетинга id={item.get('Id')}"
-                )
-                results.append(item)
-        return results
+        return run_batches(
+            self._transport,
+            "audiencetargets",
+            method="add",
+            params_key="AudienceTargets",
+            items=body_list,
+            on_item_error=on_item_error,
+            action="создания условия ретаргетинга",
+            result_key="AddResults",
+        )
+
+    @overload
+    def delete(
+        self,
+        ids: Sequence[int],
+        *,
+        confirm: bool = False,
+        on_item_error: Literal["raise"] = ...,
+    ) -> List[Dict[str, Any]]: ...
+
+    @overload
+    def delete(
+        self,
+        ids: Sequence[int],
+        *,
+        confirm: bool = False,
+        on_item_error: Literal["collect"],
+    ) -> BatchResult: ...
 
     def delete(
         self,
         ids: Sequence[int],
         *,
         confirm: bool = False,
-    ) -> List[Dict[str, Any]]:
+        on_item_error: OnItemError = "raise",
+    ) -> Union[List[Dict[str, Any]], BatchResult]:
         """Удалить условия ретаргетинга по ID (audiencetargets/delete).
 
         :param ids: список ID условий.
         :param confirm: явное подтверждение необратимой операции удаления.
-        :return: список элементов DeleteResults.
+        :param on_item_error: `raise` или `collect` (см. `ads.create`).
+        :return: список элементов DeleteResults (или `BatchResult`).
         """
         self._ensure_writable("delete")
         ensure_confirmed("retargeting_conditions.delete", confirm)
         id_list = list(ids)
         if not id_list:
-            return []
-        results: List[Dict[str, Any]] = []
-        for chunk in chunked(id_list, MAX_MUTATE_IDS):
-            payload: Dict[str, Any] = {
-                "method": "delete",
-                "params": {"SelectionCriteria": {"Ids": list(chunk)}},
-            }
-            result = self._transport.post_result("audiencetargets", payload)
-            for item in result.get("DeleteResults") or []:
-                check_item_errors(
-                    item, f"удаления условия ретаргетинга id={item.get('Id')}"
-                )
-                results.append(item)
-        return results
+            return empty_result(on_item_error)
+        self._validator().ids(id_list, field="SelectionCriteria.Ids")
+        return run_batches(
+            self._transport,
+            "audiencetargets",
+            method="delete",
+            params_key="SelectionCriteria",
+            items=id_list,
+            on_item_error=on_item_error,
+            action="удаления условия ретаргетинга",
+            result_key="DeleteResults",
+            wrap_id=True,
+        )
 
 
 def _new_body(item: RetargetingConditionInput) -> Dict[str, Any]:

@@ -214,7 +214,11 @@ def get_new_token(
 
         def _serve() -> None:
             while capture.code is None and capture.error is None:
-                httpd.handle_request()
+                try:
+                    httpd.handle_request()
+                except (OSError, ValueError):
+                    # Сервер уже закрыт по таймауту — обслуживание не требуется.
+                    break
 
         thread = threading.Thread(target=_serve, daemon=True)
         thread.start()

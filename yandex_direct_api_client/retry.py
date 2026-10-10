@@ -9,10 +9,9 @@
 """
 from __future__ import annotations
 
-import logging
 import threading
 import time
-from typing import Callable, Optional
+from typing import Any, Callable, Dict, Optional
 
 import requests
 
@@ -23,8 +22,9 @@ from .exceptions import (
     RateLimitError,
     ReportNotReadyError,
 )
+from .logs import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class TokenBucket:
@@ -89,12 +89,55 @@ def _parse_retry_in(resp: requests.Response, default: float) -> float:
     return default
 
 
-def _extract_request_id(resp: requests.Response) -> Optional[str]:
+def extract_request_id(resp: requests.Response) -> Optional[str]:
+    """Достать `X-Request-Id` из ответа Яндекса (нужен для тикетов поддержки).
+
+    :param resp: ответ HTTP.
+    :return: идентификатор запроса или None.
+    """
     return (
         resp.headers.get("X-Request-Id")
         or resp.headers.get("X-RequestId")
         or resp.headers.get("requestId")
     )
+
+
+#: Историческое имя (приватное) — оставлено для совместимости внутренних импортов.
+_extract_request_id = extract_request_id
+
+
+def _parse_api_error(resp: requests.Response) -> Dict[str, Any]:
+    """Разобрать error-блок Яндекса из тела ответа (F-0.4).
+
+    Яндекс отдаёт описание ошибки в JSON даже при non-2xx, поэтому код и
+    детали ошибки доступны и в этом случае — их полезно цитировать в тикет.
+
+    :param resp: ответ HTTP с телом-ошибкой.
+    :return: поля `error_code`, `error_string`, `details` и `body`
+        (пустые значения, если тело нечитаемо).
+    """
+    empty: Dict[str, Any] = {
+        "error_code": None,
+        "error_string": None,
+        "details": None,
+        "body": None,
+    }
+    try:
+        data: Any = resp.json()
+    except ValueError:
+        return empty
+    if not isinstance(data, dict):
+        return empty
+    err = data.get("error")
+    if not isinstance(err, dict):
+        return {**empty, "body": data}
+    code = err.get("error_code")
+    return {
+        "error_code": str(code) if code is not None else None,
+        "error_string": err.get("error_string"),
+        "details": err.get("details"),
+        "body": data,
+    }
 
 
 def request_with_retry(
@@ -106,8 +149,14 @@ def request_with_retry(
     max_delay: float = 60.0,
     report: bool = False,
     report_timeout: float = DEFAULT_REPORT_TIMEOUT,
+    log_ctx: Optional[Dict[str, Any]] = None,
 ) -> requests.Response:
     """Выполнить HTTP-запрос с retry и rate limiting.
+
+    Повторяются только временные сбои (429 и «отчёт в очереди» 201/202).
+    Ошибки авторизации (401/403), валидации (400) и прочие постоянные
+    4xx/5xx-ответы, не относящиеся к отчётам, повторов не получают — см.
+    классификацию в `exceptions.classify_error`.
 
     :param do_request: callable, делающий один HTTP-запрос и возвращающий
         `requests.Response`.
@@ -118,6 +167,7 @@ def request_with_retry(
     :param report: если True — трактовать 202/201 как "отчёт в очереди"
         и поллить до готовности с `report_timeout`.
     :param report_timeout: максимум секунд ожидания готовности отчёта.
+    :param log_ctx: поля `extra` для лог-сообщений (уже замаскированы).
     :return: успешный `Response` (2xx).
     :raises AuthError: 401/403.
     :raises RateLimitError: 429 после исчерпания ретраев.
@@ -126,19 +176,24 @@ def request_with_retry(
     """
     started = time.monotonic()
     attempt = 0
+    ctx: Dict[str, Any] = dict(log_ctx or {})
 
     while True:
         bucket.acquire()
         resp = do_request()
         status = resp.status_code
-        req_id = _extract_request_id(resp)
+        req_id = extract_request_id(resp)
+        ctx["request_id"] = req_id or "-"
+        ctx["status_code"] = status
+        ctx["attempt"] = attempt + 1
 
         # Успешный ответ
         if 200 <= status < 300 and not (report and status in (201, 202)):
             return resp
 
-        # Auth
+        # Auth — повтор бессмысленен (нет доступа/невалидный токен).
         if status in (401, 403):
+            logger.error("Ошибка авторизации: HTTP %s", status, extra=ctx)
             raise AuthError(
                 f"Ошибка авторизации: {resp.text[:300]}",
                 request_id=req_id,
@@ -149,6 +204,9 @@ def request_with_retry(
         # Rate limit (429) — retry с backoff
         if status == 429:
             if attempt >= max_retries:
+                logger.error(
+                    "Лимит запросов исчерпан после %d повторов", attempt, extra=ctx
+                )
                 raise RateLimitError(
                     "Превышен лимит запросов (429) после всех повторов",
                     retry_after=_parse_retry_after(resp, default=base_delay),
@@ -165,6 +223,7 @@ def request_with_retry(
                 attempt + 1,
                 max_retries,
                 wait,
+                extra=ctx,
             )
             time.sleep(wait)
             attempt += 1
@@ -186,20 +245,27 @@ def request_with_retry(
                 "Отчёт в очереди (HTTP %d), следующий poll через %.1fс",
                 status,
                 wait,
+                extra=ctx,
             )
             time.sleep(wait)
             continue
 
         # Любая другая ошибка — не retryable
+        logger.error("Терминальная ошибка API: HTTP %s", status, extra=ctx)
+        parsed = _parse_api_error(resp)
+        message = parsed["error_string"] or resp.text[:300]
         raise ApiError(
-            f"API вернул HTTP {status}: {resp.text[:300]}",
+            f"API вернул HTTP {status}: {message}",
+            error_code=parsed["error_code"],
+            details=parsed["details"],
             request_id=req_id,
             status_code=status,
-            response_body=resp.text,
+            response_body=parsed["body"] if parsed["body"] is not None else resp.text,
         )
 
 
 __all__ = [
     "TokenBucket",
+    "extract_request_id",
     "request_with_retry",
 ]

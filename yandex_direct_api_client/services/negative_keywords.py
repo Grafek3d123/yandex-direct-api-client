@@ -7,20 +7,35 @@ https://yandex.ru/dev/direct/doc/ru/negativekeywordsharedsets/negativekeywordsha
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
+from typing import (
+    Any,
+    Dict,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Sequence,
+    Union,
+    overload,
+)
 
 from .._transport import Transport
+from ..limits import GET_PAGE_MAX, NEGATIVE_KEYWORDS_MAX
+from ..models.batch import BatchResult
 from ..models.negative_keyword import NegativeKeywordSharedSet
+from ..validation import Validator
 from ._base import (
-    check_item_errors,
+    OnItemError,
     chunked,
+    empty_result,
     ensure_confirmed,
     ensure_writable,
     fetch_all_pages,
+    run_batches,
 )
 
-# negativekeywordsharedsets: не более 30 объектов/Id в одном вызове метода
-_MAX_SETS = 30
+#: negativekeywordsharedsets: не более 30 объектов/Id в одном вызове метода.
+_MAX_SETS = NEGATIVE_KEYWORDS_MAX
 
 _DEFAULT_FIELDS = ["Id", "Name", "NegativeKeywords", "Associated"]
 
@@ -37,7 +52,12 @@ class NegativeKeywordService:
     def _ensure_writable(self, method_name: str) -> None:
         ensure_writable("negative_keywords", method_name, self._readonly)
 
-    def list(self, *, page_limit: int = 10000) -> List[NegativeKeywordSharedSet]:
+    def _validator(self) -> Validator:
+        return Validator(self._transport.validate_enabled)
+
+    def list(
+        self, *, page_limit: int = GET_PAGE_MAX
+    ) -> List[NegativeKeywordSharedSet]:
         """Список всех наборов минус-фраз клиента с авто-пагинацией.
 
         :param page_limit: размер страницы.
@@ -67,6 +87,7 @@ class NegativeKeywordService:
         """
         if not ids:
             return []
+        self._validator().ids(ids, field="Ids")
         fields = list(field_names) if field_names else list(_DEFAULT_FIELDS)
         results: List[NegativeKeywordSharedSet] = []
         for chunk in chunked(list(ids), _MAX_SETS):
@@ -82,88 +103,140 @@ class NegativeKeywordService:
                 results.append(NegativeKeywordSharedSet.from_dict(raw))
         return results
 
+    @overload
     def create(
-        self, sets: Sequence[NegativeKeywordSetInput]
-    ) -> List[Dict[str, Any]]:
+        self,
+        sets: Sequence[NegativeKeywordSetInput],
+        *,
+        on_item_error: Literal["raise"] = ...,
+    ) -> List[Dict[str, Any]]: ...
+
+    @overload
+    def create(
+        self,
+        sets: Sequence[NegativeKeywordSetInput],
+        *,
+        on_item_error: Literal["collect"],
+    ) -> BatchResult: ...
+
+    def create(
+        self,
+        sets: Sequence[NegativeKeywordSetInput],
+        *,
+        on_item_error: OnItemError = "raise",
+    ) -> Union[List[Dict[str, Any]], BatchResult]:
         """Создать наборы минус-фраз (batch, до 30 за запрос).
 
         :param sets: типизированные модели или тела SharedSetAddItem.
-        :return: список элементов AddResults.
+        :param on_item_error: `raise` или `collect` (см. `ads.create`).
+        :return: список элементов AddResults (или `BatchResult`).
         """
         self._ensure_writable("create")
         body_list = [_new_body(x) for x in sets]
-        if not body_list:
-            return []
-        results: List[Dict[str, Any]] = []
-        for chunk in chunked(body_list, _MAX_SETS):
-            payload: Dict[str, Any] = {
-                "method": "add",
-                "params": {"NegativeKeywordSharedSets": list(chunk)},
-            }
-            result = self._transport.post_result("negativekeywordsharedsets", payload)
-            for item in result.get("AddResults") or []:
-                check_item_errors(
-                    item, f"создания набора минус-фраз id={item.get('Id')}"
-                )
-                results.append(item)
-        return results
+        return run_batches(
+            self._transport,
+            "negativekeywordsharedsets",
+            method="add",
+            params_key="NegativeKeywordSharedSets",
+            items=body_list,
+            on_item_error=on_item_error,
+            action="создания набора минус-фраз",
+            result_key="AddResults",
+            chunk_size=_MAX_SETS,
+        )
+
+    @overload
+    def update(
+        self,
+        sets: Sequence[NegativeKeywordSetInput],
+        *,
+        on_item_error: Literal["raise"] = ...,
+    ) -> List[Dict[str, Any]]: ...
+
+    @overload
+    def update(
+        self,
+        sets: Sequence[NegativeKeywordSetInput],
+        *,
+        on_item_error: Literal["collect"],
+    ) -> BatchResult: ...
 
     def update(
-        self, sets: Sequence[NegativeKeywordSetInput]
-    ) -> List[Dict[str, Any]]:
+        self,
+        sets: Sequence[NegativeKeywordSetInput],
+        *,
+        on_item_error: OnItemError = "raise",
+    ) -> Union[List[Dict[str, Any]], BatchResult]:
         """Обновить наборы минус-фраз (batch, до 30 за запрос).
 
         :param sets: типизированные модели с Id или тела {Id, Name, ...}.
-        :return: список элементов UpdateResults.
+        :param on_item_error: `raise` или `collect` (см. `ads.create`).
+        :return: список элементов UpdateResults (или `BatchResult`).
         """
         self._ensure_writable("update")
         body_list = [_update_body(x) for x in sets]
-        if not body_list:
-            return []
-        results: List[Dict[str, Any]] = []
-        for chunk in chunked(body_list, _MAX_SETS):
-            payload: Dict[str, Any] = {
-                "method": "update",
-                "params": {"NegativeKeywordSharedSets": list(chunk)},
-            }
-            result = self._transport.post_result("negativekeywordsharedsets", payload)
-            for item in result.get("UpdateResults") or []:
-                check_item_errors(
-                    item, f"обновления набора минус-фраз id={item.get('Id')}"
-                )
-                results.append(item)
-        return results
+        return run_batches(
+            self._transport,
+            "negativekeywordsharedsets",
+            method="update",
+            params_key="NegativeKeywordSharedSets",
+            items=body_list,
+            on_item_error=on_item_error,
+            action="обновления набора минус-фраз",
+            result_key="UpdateResults",
+            chunk_size=_MAX_SETS,
+        )
+
+    @overload
+    def delete(
+        self,
+        ids: Sequence[int],
+        *,
+        confirm: bool = False,
+        on_item_error: Literal["raise"] = ...,
+    ) -> List[Dict[str, Any]]: ...
+
+    @overload
+    def delete(
+        self,
+        ids: Sequence[int],
+        *,
+        confirm: bool = False,
+        on_item_error: Literal["collect"],
+    ) -> BatchResult: ...
 
     def delete(
         self,
         ids: Sequence[int],
         *,
         confirm: bool = False,
-    ) -> List[Dict[str, Any]]:
+        on_item_error: OnItemError = "raise",
+    ) -> Union[List[Dict[str, Any]], BatchResult]:
         """Удалить наборы минус-фраз по ID (авто-чанкинг по 30).
 
         :param ids: список ID наборов.
         :param confirm: явное подтверждение необратимой операции удаления.
-        :return: список элементов DeleteResults.
+        :param on_item_error: `raise` или `collect` (см. `ads.create`).
+        :return: список элементов DeleteResults (или `BatchResult`).
         """
         self._ensure_writable("delete")
         ensure_confirmed("negative_keywords.delete", confirm)
         id_list = list(ids)
         if not id_list:
-            return []
-        results: List[Dict[str, Any]] = []
-        for chunk in chunked(id_list, _MAX_SETS):
-            payload: Dict[str, Any] = {
-                "method": "delete",
-                "params": {"SelectionCriteria": {"Ids": list(chunk)}},
-            }
-            result = self._transport.post_result("negativekeywordsharedsets", payload)
-            for item in result.get("DeleteResults") or []:
-                check_item_errors(
-                    item, f"удаления набора минус-фраз id={item.get('Id')}"
-                )
-                results.append(item)
-        return results
+            return empty_result(on_item_error)
+        self._validator().ids(id_list, field="SelectionCriteria.Ids")
+        return run_batches(
+            self._transport,
+            "negativekeywordsharedsets",
+            method="delete",
+            params_key="SelectionCriteria",
+            items=id_list,
+            on_item_error=on_item_error,
+            action="удаления набора минус-фраз",
+            result_key="DeleteResults",
+            chunk_size=_MAX_SETS,
+            wrap_id=True,
+        )
 
 
 def _new_body(item: NegativeKeywordSetInput) -> Dict[str, Any]:

@@ -1,18 +1,35 @@
 """Сервис ключевых фраз: list, get, add, set_bids, delete."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
+from typing import (
+    Any,
+    Dict,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Sequence,
+    Union,
+    overload,
+)
 
 from .._transport import Transport
-from ..models.ad_group_item import AdGroupItem, AdGroupItemBids
+from ..limits import CRITERIA_GET_MAX, GET_PAGE_MAX
+from ..models.ad_group_item import (
+    BID_TYPE_SEARCH,
+    AdGroupItem,
+    AdGroupItemBids,
+)
+from ..models.batch import BatchResult
+from ..validation import Validator
 from ._base import (
-    MAX_GET_IDS,
-    MAX_MUTATE_IDS,
-    check_item_errors,
+    OnItemError,
     chunked,
+    empty_result,
     ensure_confirmed,
     ensure_writable,
     fetch_all_pages,
+    run_batches,
 )
 
 _DEFAULT_FIELDS = ["Id", "CampaignId", "AdGroupId", "Item", "Bid", "Context"]
@@ -31,12 +48,15 @@ class AdGroupItemService:
     def _ensure_writable(self, method_name: str) -> None:
         ensure_writable("criteria", method_name, self._readonly)
 
+    def _validator(self) -> Validator:
+        return Validator(self._transport.validate_enabled)
+
     def list(
         self,
         *,
         campaign_ids: Optional[Sequence[int]] = None,
         ad_group_ids: Optional[Sequence[int]] = None,
-        page_limit: int = 10000,
+        page_limit: int = GET_PAGE_MAX,
     ) -> List[AdGroupItem]:
         """Список ключевых фраз с авто-пагинацией.
 
@@ -75,9 +95,10 @@ class AdGroupItemService:
         """
         if not ids:
             return []
+        self._validator().ids(ids, field="Ids")
         fields = list(field_names) if field_names else list(_DEFAULT_FIELDS)
         results: List[AdGroupItem] = []
-        for chunk in chunked(list(ids), MAX_GET_IDS):
+        for chunk in chunked(list(ids), CRITERIA_GET_MAX):
             payload: Dict[str, Any] = {
                 "method": "get",
                 "params": {
@@ -90,60 +111,111 @@ class AdGroupItemService:
                 results.append(AdGroupItem.from_dict(raw))
         return results
 
-    def add(self, items: Sequence[AdGroupItemInput]) -> List[Dict[str, Any]]:
+    @overload
+    def add(
+        self,
+        items: Sequence[AdGroupItemInput],
+        *,
+        on_item_error: Literal["raise"] = ...,
+    ) -> List[Dict[str, Any]]: ...
+
+    @overload
+    def add(
+        self,
+        items: Sequence[AdGroupItemInput],
+        *,
+        on_item_error: Literal["collect"],
+    ) -> BatchResult: ...
+
+    def add(
+        self,
+        items: Sequence[AdGroupItemInput],
+        *,
+        on_item_error: OnItemError = "raise",
+    ) -> Union[List[Dict[str, Any]], BatchResult]:
         """Добавить ключевые фразы (batch, до 200 за запрос).
 
         :param items: типизированные модели или тела AdGroupItemNew.
-        :return: список элементов AddResults.
+        :param on_item_error: `raise` или `collect` (см. `ads.create`).
+        :return: список элементов AddResults (или `BatchResult`).
         """
         self._ensure_writable("add")
         item_list = [_item_body(i) for i in items]
-        if not item_list:
-            return []
-        results: List[Dict[str, Any]] = []
-        for chunk in chunked(item_list, MAX_MUTATE_IDS):
-            payload: Dict[str, Any] = {
-                "method": "add",
-                "params": {"AdGroupItems": list(chunk)},
-            }
-            result = self._transport.post_result("criteria", payload)
-            for item in result.get("AddResults") or []:
-                check_item_errors(
-                    item, f"добавления ключевой фразы id={item.get('Id')}"
+        self._validate_items(item_list, require_id=False)
+        return run_batches(
+            self._transport,
+            "criteria",
+            method="add",
+            params_key="AdGroupItems",
+            items=item_list,
+            on_item_error=on_item_error,
+            action="добавления ключевой фразы",
+            result_key="AddResults",
+        )
+
+    def _validate_items(
+        self, items: Sequence[Dict[str, Any]], *, require_id: bool
+    ) -> None:
+        """Проверить тела ключевых фраз до отправки (если валидация включена).
+
+        :param items: тела criteria/add или criteria/update.
+        :param require_id: True ли требуется поле `Id` (для setbids).
+        """
+        validator = self._validator()
+        for item in items:
+            if require_id:
+                validator.ids([item.get("Id")], field="AdGroupItem.Id")
+            else:
+                validator.ids(
+                    [item.get("AdGroupId")], field="AdGroupItem.AdGroupId"
                 )
-                results.append(item)
-        return results
+
+    @overload
+    def set_bids(
+        self,
+        bids: Sequence[AdGroupItemBidsInput],
+        *,
+        confirm: bool = False,
+        on_item_error: Literal["raise"] = ...,
+    ) -> List[Dict[str, Any]]: ...
+
+    @overload
+    def set_bids(
+        self,
+        bids: Sequence[AdGroupItemBidsInput],
+        *,
+        confirm: bool = False,
+        on_item_error: Literal["collect"],
+    ) -> BatchResult: ...
 
     def set_bids(
         self,
         bids: Sequence[AdGroupItemBidsInput],
         *,
         confirm: bool = False,
-    ) -> List[Dict[str, Any]]:
+        on_item_error: OnItemError = "raise",
+    ) -> Union[List[Dict[str, Any]], BatchResult]:
         """Изменить ставки ключевых фраз (batch, до 200 за запрос).
 
         :param bids: типизированные модели или тела {Id, Bids}.
         :param confirm: явное подтверждение массового изменения.
-        :return: список элементов SetBidsResults.
+        :param on_item_error: `raise` или `collect` (см. `ads.create`).
+        :return: список элементов SetBidsResults (или `BatchResult`).
         """
         self._ensure_writable("set_bids")
         ensure_confirmed("criteria.set_bids", confirm)
         bid_list = [_bids_body(b) for b in bids]
-        if not bid_list:
-            return []
-        results: List[Dict[str, Any]] = []
-        for chunk in chunked(bid_list, MAX_MUTATE_IDS):
-            payload: Dict[str, Any] = {
-                "method": "setbids",
-                "params": {"AdGroupItems": list(chunk)},
-            }
-            result = self._transport.post_result("criteria", payload)
-            for item in result.get("SetBidsResults") or []:
-                check_item_errors(
-                    item, f"изменения ставки id={item.get('Id')}"
-                )
-                results.append(item)
-        return results
+        self._validate_items(bid_list, require_id=True)
+        return run_batches(
+            self._transport,
+            "criteria",
+            method="setbids",
+            params_key="AdGroupItems",
+            items=bid_list,
+            on_item_error=on_item_error,
+            action="изменения ставки ключевой фразы",
+            result_key="SetBidsResults",
+        )
 
     def set_bid(
         self,
@@ -151,50 +223,75 @@ class AdGroupItemService:
         bid: float,
         *,
         auto_bid_fixed: Optional[float] = None,
+        bid_type: str = BID_TYPE_SEARCH,
     ) -> Dict[str, Any]:
         """Изменить ставку одной ключевой фразы (одиночная операция).
 
         :param item_id: ID ключевой фразы.
-        :param bid: новая ставка.
-        :param auto_bid_fixed: фиксированная ставка автобiddingа.
+        :param bid: новая ставка (в валюте аккаунта).
+        :param auto_bid_fixed: фиксированная ставка автобиддинга.
+        :param bid_type: `search` (поле `Bid`) или `network` (поле `ContextBid`).
         :return: элемент SetBidsResults.
         """
         self._ensure_writable("set_bid")
         single = AdGroupItemBids(
-            id=int(item_id), bid=bid, auto_bid_fixed=auto_bid_fixed
+            id=int(item_id),
+            bid=bid,
+            auto_bid_fixed=auto_bid_fixed,
+            bid_type=bid_type,
         )
         return self.set_bids([single], confirm=True)[0]
+
+    @overload
+    def delete(
+        self,
+        ids: Sequence[int],
+        *,
+        confirm: bool = False,
+        on_item_error: Literal["raise"] = ...,
+    ) -> List[Dict[str, Any]]: ...
+
+    @overload
+    def delete(
+        self,
+        ids: Sequence[int],
+        *,
+        confirm: bool = False,
+        on_item_error: Literal["collect"],
+    ) -> BatchResult: ...
 
     def delete(
         self,
         ids: Sequence[int],
         *,
         confirm: bool = False,
-    ) -> List[Dict[str, Any]]:
+        on_item_error: OnItemError = "raise",
+    ) -> Union[List[Dict[str, Any]], BatchResult]:
         """Удалить ключевые фразы по ID (авто-чанкинг по 200).
 
         :param ids: список ID ключевых фраз.
         :param confirm: явное подтверждение необратимой операции удаления.
-        :return: список элементов DeleteResults.
+        :param on_item_error: `raise` или `collect` (см. `ads.create`).
+        :return: список элементов DeleteResults (или `BatchResult`).
         """
         self._ensure_writable("delete")
         ensure_confirmed("criteria.delete", confirm)
         id_list = list(ids)
-        if not id_list:
-            return []
-        results: List[Dict[str, Any]] = []
-        for chunk in chunked(id_list, MAX_MUTATE_IDS):
-            payload: Dict[str, Any] = {
-                "method": "delete",
-                "params": {"SelectionCriteria": {"Ids": list(chunk)}},
-            }
-            result = self._transport.post_result("criteria", payload)
-            for item in result.get("DeleteResults") or []:
-                check_item_errors(
-                    item, f"удаления ключевой фразы id={item.get('Id')}"
-                )
-                results.append(item)
-        return results
+        if id_list:
+            self._validator().ids(id_list, field="SelectionCriteria.Ids")
+        else:
+            return empty_result(on_item_error)
+        return run_batches(
+            self._transport,
+            "criteria",
+            method="delete",
+            params_key="SelectionCriteria",
+            items=id_list,
+            on_item_error=on_item_error,
+            action="удаления ключевой фразы",
+            result_key="DeleteResults",
+            wrap_id=True,
+        )
 
 
 def _item_body(item: AdGroupItemInput) -> Dict[str, Any]:

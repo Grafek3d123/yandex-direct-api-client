@@ -50,3 +50,19 @@ def to_optional_int(value: Any) -> Optional[int]:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def to_bool(value: Any, default: bool = False) -> bool:
+    """Привести значение API к bool (в JSON встречаются `0`/`1` и `true`)."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    text = str(value).strip().lower()
+    if text in {"true", "yes", "1"}:
+        return True
+    if text in {"false", "no", "0", ""}:
+        return False
+    return default

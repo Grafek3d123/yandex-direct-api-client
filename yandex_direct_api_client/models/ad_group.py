@@ -62,7 +62,14 @@ class AdGroup:
         )
 
     def to_new_payload(self) -> Dict[str, Any]:
-        """Тело для adgroups/add (AdGroupNew)."""
+        """Тело для adgroups/add (AdGroupAddItem).
+
+        `Type` в запросе **не отправляется**: в актуальном API тип группы
+        задаётся типоспецифичной структурой (`CpmBannerKeywordsAdGroup: {}`
+        и т. п.), а сам `Type` приходит только в ответе `adgroups/get`.
+        Раньше SDK полагался на `Type`, и РСЯ-группа без него не создавалась —
+        теперь используйте билдеры `models/ad_group_payloads.py`.
+        """
         body: Dict[str, Any] = {}
         if self.campaign_id is not None:
             body["CampaignId"] = self.campaign_id

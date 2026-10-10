@@ -73,7 +73,7 @@ def test_ad_groups_create_typed(client: YandexDirectClient) -> None:
         status=200,
     )
     res = client.ad_groups.create(
-        [AdGroup(id=0, campaign_id=10, name="g", region_ids=[0])]
+        [AdGroup(id=0, campaign_id=10, name="g", region_ids=[225])]
     )
     assert res[0]["Id"] == 100
     payload = _body_of(responses.calls[0])
@@ -81,7 +81,7 @@ def test_ad_groups_create_typed(client: YandexDirectClient) -> None:
     sent = payload["params"]["AdGroups"][0]
     assert sent["CampaignId"] == 10
     assert sent["Name"] == "g"
-    assert sent["RegionIds"] == [0]
+    assert sent["RegionIds"] == [225]
 
 
 @responses.activate
@@ -92,7 +92,9 @@ def test_ad_groups_create_raw_dict(client: YandexDirectClient) -> None:
         json={"result": {"AddResults": [{"Id": 101}]}},
         status=200,
     )
-    res = client.ad_groups.create([{"CampaignId": 1, "Name": "x", "RegionIds": [0]}])
+    res = client.ad_groups.create(
+        [{"CampaignId": 1, "Name": "x", "RegionIds": [225]}]
+    )
     assert res[0]["Id"] == 101
 
 
@@ -116,7 +118,7 @@ def test_ad_groups_create_item_error(client: YandexDirectClient) -> None:
     )
     with pytest.raises(ApiError):
         client.ad_groups.create(
-            [AdGroup(id=0, campaign_id=10, name="g", region_ids=[0])]
+            [AdGroup(id=0, campaign_id=10, name="g", region_ids=[225])]
         )
 
 
@@ -130,7 +132,7 @@ def test_ad_groups_update_typed(client: YandexDirectClient) -> None:
         status=200,
     )
     res = client.ad_groups.update(
-        [AdGroup(id=100, campaign_id=10, name="renamed", region_ids=[0])]
+        [AdGroup(id=100, campaign_id=10, name="renamed", region_ids=[225])]
     )
     assert res[0]["Id"] == 100
     payload = _body_of(responses.calls[0])

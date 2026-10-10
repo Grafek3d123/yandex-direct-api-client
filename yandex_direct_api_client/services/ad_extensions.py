@@ -10,18 +10,30 @@
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Mapping, Sequence, Union
+from typing import (
+    Any,
+    Dict,
+    List,
+    Literal,
+    Mapping,
+    Sequence,
+    Union,
+    overload,
+)
 
 from .._transport import Transport
+from ..limits import AD_EXTENSIONS_GET_MAX, GET_PAGE_MAX
 from ..models.ad_extension import Callout, Sitelink, SitelinksSet
+from ..models.batch import BatchResult
+from ..validation import Validator
 from ._base import (
-    MAX_GET_IDS,
-    MAX_MUTATE_IDS,
-    check_item_errors,
+    OnItemError,
     chunked,
+    empty_result,
     ensure_confirmed,
     ensure_writable,
     fetch_all_pages,
+    run_batches,
 )
 
 _SITELINKS_FIELDS = ["Id", "Sitelinks"]
@@ -42,8 +54,11 @@ class AdExtensionService:
     def _ensure_writable(self, method_name: str) -> None:
         ensure_writable("ad_extensions", method_name, self._readonly)
 
+    def _validator(self) -> Validator:
+        return Validator(self._transport.validate_enabled)
+
     # ---------------- быстрые ссылки (sitelinks) ----------------
-    def list_sitelinks(self, *, page_limit: int = 10000) -> List[SitelinksSet]:
+    def list_sitelinks(self, *, page_limit: int = GET_PAGE_MAX) -> List[SitelinksSet]:
         """Список наборов быстрых ссылок с авто-пагинацией.
 
         :param page_limit: размер страницы.
@@ -64,8 +79,9 @@ class AdExtensionService:
         """
         if not ids:
             return []
+        self._validator().ids(ids, field="Ids")
         results: List[SitelinksSet] = []
-        for chunk in chunked(list(ids), MAX_GET_IDS):
+        for chunk in chunked(list(ids), AD_EXTENSIONS_GET_MAX):
             payload: Dict[str, Any] = {
                 "method": "get",
                 "params": {
@@ -78,41 +94,79 @@ class AdExtensionService:
                 results.append(SitelinksSet.from_dict(raw))
         return results
 
+    @overload
     def create_sitelinks(
-        self, sets: Sequence[SitelinksSetInput]
-    ) -> List[Dict[str, Any]]:
+        self,
+        sets: Sequence[SitelinksSetInput],
+        *,
+        on_item_error: Literal["raise"] = ...,
+    ) -> List[Dict[str, Any]]: ...
+
+    @overload
+    def create_sitelinks(
+        self,
+        sets: Sequence[SitelinksSetInput],
+        *,
+        on_item_error: Literal["collect"],
+    ) -> BatchResult: ...
+
+    def create_sitelinks(
+        self,
+        sets: Sequence[SitelinksSetInput],
+        *,
+        on_item_error: OnItemError = "raise",
+    ) -> Union[List[Dict[str, Any]], BatchResult]:
         """Создать наборы быстрых ссылок (batch, до 200 за запрос).
 
         :param sets: типизированные модели SitelinksSet или тела
             SitelinksSetAddItem {Sitelinks: [...]}.
-        :return: список элементов AddResults.
+        :param on_item_error: `raise` или `collect` (см. `ads.create`).
+        :return: список элементов AddResults (или `BatchResult`).
         """
         self._ensure_writable("create_sitelinks")
         body_list = [_sitelinks_new_body(x) for x in sets]
-        if not body_list:
-            return []
-        results: List[Dict[str, Any]] = []
-        for chunk in chunked(body_list, MAX_MUTATE_IDS):
-            payload: Dict[str, Any] = {
-                "method": "add",
-                "params": {"SitelinksSets": list(chunk)},
-            }
-            result = self._transport.post_result("sitelinks", payload)
-            for item in result.get("AddResults") or []:
-                check_item_errors(
-                    item, f"создания набора быстрых ссылок id={item.get('Id')}"
-                )
-                results.append(item)
-        return results
+        return run_batches(
+            self._transport,
+            "sitelinks",
+            method="add",
+            params_key="SitelinksSets",
+            items=body_list,
+            on_item_error=on_item_error,
+            action="создания набора быстрых ссылок",
+            result_key="AddResults",
+        )
+
+    @overload
+    def delete_sitelinks(
+        self,
+        ids: Sequence[int],
+        *,
+        confirm: bool = False,
+        on_item_error: Literal["raise"] = ...,
+    ) -> List[Dict[str, Any]]: ...
+
+    @overload
+    def delete_sitelinks(
+        self,
+        ids: Sequence[int],
+        *,
+        confirm: bool = False,
+        on_item_error: Literal["collect"],
+    ) -> BatchResult: ...
 
     def delete_sitelinks(
-        self, ids: Sequence[int], *, confirm: bool = False
-    ) -> List[Dict[str, Any]]:
+        self,
+        ids: Sequence[int],
+        *,
+        confirm: bool = False,
+        on_item_error: OnItemError = "raise",
+    ) -> Union[List[Dict[str, Any]], BatchResult]:
         """Удалить наборы быстрых ссылок по ID (авто-чанкинг по 200).
 
         :param ids: список ID наборов.
         :param confirm: явное подтверждение необратимой операции удаления.
-        :return: список элементов DeleteResults.
+        :param on_item_error: `raise` или `collect` (см. `ads.create`).
+        :return: список элементов DeleteResults (или `BatchResult`).
         """
         self._ensure_writable("delete_sitelinks")
         ensure_confirmed("ad_extensions.delete_sitelinks", confirm)
@@ -122,10 +176,11 @@ class AdExtensionService:
             "DeleteResults",
             "удаления набора быстрых ссылок",
             ids,
+            on_item_error,
         )
 
     # ---------------- уточнения (adextensions, CALLOUT) ----------------
-    def list_callouts(self, *, page_limit: int = 10000) -> List[Callout]:
+    def list_callouts(self, *, page_limit: int = GET_PAGE_MAX) -> List[Callout]:
         """Список уточнений с авто-пагинацией.
 
         :param page_limit: размер страницы.
@@ -150,8 +205,9 @@ class AdExtensionService:
         """
         if not ids:
             return []
+        self._validator().ids(ids, field="Ids")
         results: List[Callout] = []
-        for chunk in chunked(list(ids), MAX_GET_IDS):
+        for chunk in chunked(list(ids), AD_EXTENSIONS_GET_MAX):
             payload: Dict[str, Any] = {
                 "method": "get",
                 "params": {
@@ -165,41 +221,79 @@ class AdExtensionService:
                 results.append(Callout.from_dict(raw))
         return results
 
+    @overload
     def create_callouts(
-        self, callouts: Sequence[CalloutInput]
-    ) -> List[Dict[str, Any]]:
+        self,
+        callouts: Sequence[CalloutInput],
+        *,
+        on_item_error: Literal["raise"] = ...,
+    ) -> List[Dict[str, Any]]: ...
+
+    @overload
+    def create_callouts(
+        self,
+        callouts: Sequence[CalloutInput],
+        *,
+        on_item_error: Literal["collect"],
+    ) -> BatchResult: ...
+
+    def create_callouts(
+        self,
+        callouts: Sequence[CalloutInput],
+        *,
+        on_item_error: OnItemError = "raise",
+    ) -> Union[List[Dict[str, Any]], BatchResult]:
         """Создать уточнения (batch, до 200 за запрос).
 
         :param callouts: типизированные модели Callout или тела
             AdExtensionAddItem {Callout: {CalloutText}}.
-        :return: список элементов AddResults.
+        :param on_item_error: `raise` или `collect` (см. `ads.create`).
+        :return: список элементов AddResults (или `BatchResult`).
         """
         self._ensure_writable("create_callouts")
         body_list = [_callout_new_body(x) for x in callouts]
-        if not body_list:
-            return []
-        results: List[Dict[str, Any]] = []
-        for chunk in chunked(body_list, MAX_MUTATE_IDS):
-            payload: Dict[str, Any] = {
-                "method": "add",
-                "params": {"AdExtensions": list(chunk)},
-            }
-            result = self._transport.post_result("adextensions", payload)
-            for item in result.get("AddResults") or []:
-                check_item_errors(
-                    item, f"создания уточнения id={item.get('Id')}"
-                )
-                results.append(item)
-        return results
+        return run_batches(
+            self._transport,
+            "adextensions",
+            method="add",
+            params_key="AdExtensions",
+            items=body_list,
+            on_item_error=on_item_error,
+            action="создания уточнения",
+            result_key="AddResults",
+        )
+
+    @overload
+    def delete_callouts(
+        self,
+        ids: Sequence[int],
+        *,
+        confirm: bool = False,
+        on_item_error: Literal["raise"] = ...,
+    ) -> List[Dict[str, Any]]: ...
+
+    @overload
+    def delete_callouts(
+        self,
+        ids: Sequence[int],
+        *,
+        confirm: bool = False,
+        on_item_error: Literal["collect"],
+    ) -> BatchResult: ...
 
     def delete_callouts(
-        self, ids: Sequence[int], *, confirm: bool = False
-    ) -> List[Dict[str, Any]]:
+        self,
+        ids: Sequence[int],
+        *,
+        confirm: bool = False,
+        on_item_error: OnItemError = "raise",
+    ) -> Union[List[Dict[str, Any]], BatchResult]:
         """Удалить уточнения по ID (авто-чанкинг по 200).
 
         :param ids: список ID уточнений.
         :param confirm: явное подтверждение необратимой операции удаления.
-        :return: список элементов DeleteResults.
+        :param on_item_error: `raise` или `collect` (см. `ads.create`).
+        :return: список элементов DeleteResults (или `BatchResult`).
         """
         self._ensure_writable("delete_callouts")
         ensure_confirmed("ad_extensions.delete_callouts", confirm)
@@ -209,6 +303,7 @@ class AdExtensionService:
             "DeleteResults",
             "удаления уточнения",
             ids,
+            on_item_error,
         )
 
     # ---------------- общий хелпер ----------------
@@ -219,22 +314,33 @@ class AdExtensionService:
         result_key: str,
         action_label: str,
         ids: Sequence[int],
-    ) -> List[Dict[str, Any]]:
-        """Общий batch-вызов delete по SelectionCriteria.Ids."""
+        on_item_error: OnItemError = "raise",
+    ) -> Union[List[Dict[str, Any]], BatchResult]:
+        """Общий batch-вызов delete по SelectionCriteria.Ids.
+
+        :param service: имя API-сервиса (sitelinks/adextensions).
+        :param method_name: имя метода API.
+        :param result_key: ключ списка результатов в ответе.
+        :param action_label: описание действия для сообщений об ошибках.
+        :param ids: список ID расширений.
+        :param on_item_error: `raise` или `collect`.
+        :return: список элементов DeleteResults (или `BatchResult`).
+        """
         id_list = list(ids)
         if not id_list:
-            return []
-        results: List[Dict[str, Any]] = []
-        for chunk in chunked(id_list, MAX_MUTATE_IDS):
-            payload: Dict[str, Any] = {
-                "method": method_name,
-                "params": {"SelectionCriteria": {"Ids": list(chunk)}},
-            }
-            result = self._transport.post_result(service, payload)
-            for item in result.get(result_key) or []:
-                check_item_errors(item, f"{action_label} id={item.get('Id')}")
-                results.append(item)
-        return results
+            return empty_result(on_item_error)
+        self._validator().ids(id_list, field="SelectionCriteria.Ids")
+        return run_batches(
+            self._transport,
+            service,
+            method=method_name,
+            params_key="SelectionCriteria",
+            items=id_list,
+            on_item_error=on_item_error,
+            action=action_label,
+            result_key=result_key,
+            wrap_id=True,
+        )
 
 
 def _sitelinks_new_body(item: SitelinksSetInput) -> Dict[str, Any]:

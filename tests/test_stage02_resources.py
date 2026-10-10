@@ -339,7 +339,7 @@ def test_ads_create_with_payload(client: YandexDirectClient) -> None:
     res = client.ads.create_with_payload(
         10,
         AdText(title="T", text="B", href="https://x.example"),
-        image=AdImage(image_id="img-1"),
+        image=AdImage(image_hash="h-1"),
         ad_group_id=20,
     )
     assert res["Id"] == 123
@@ -350,7 +350,9 @@ def test_ads_create_with_payload(client: YandexDirectClient) -> None:
     assert "Type" not in sent
     assert sent["AdGroupId"] == 20
     assert sent["TextAd"]["Title"] == "T"
-    assert sent["ImageAd"]["ImageId"] == "img-1"
+    # Изображение передаётся хэшем внутри TextAd (docs: AdImageHash).
+    assert sent["TextAd"]["AdImageHash"] == "h-1"
+    assert "ImageAd" not in sent
 
 
 # ---------- readonly ----------

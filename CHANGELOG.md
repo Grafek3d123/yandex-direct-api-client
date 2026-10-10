@@ -29,7 +29,282 @@ New safety semantics:
   (raises `ValidationError` before any HTTP request is sent).
 - `StatRow.merged_with` computes weighted-average `bounce_rate` (was: sum).
 
+## Migration guide: 0.5.x → 1.0.0
+
+1.0.0 — первая стабильная версия. Ниже только то, что действительно ломает
+код пользователя; всё остальное — новые возможности.
+
+| 0.5.x | 1.0.0 |
+|---|---|
+| `AdImage(image_id=...)` | `ImageAdRef(image_hash=...)` (алиас `AdImage` сохранён и работает) |
+| `client.campaigns.create(ad_images...)` (гипотетический media-flow) | `client.ad_images.add(...)` → `client.ads.create_responsive_ad(..., ad_image_hashes=[...])` |
+| `adimages/update`, `adimages/unbind`, `adimages/remove` | удалены: таких методов в API нет, остались `add`/`get`/`delete` |
+| `client.campaigns.create({"Name": ..., "CpmBannerCampaign": ...})` с ручной стратегией | тот же словарь принимается, но стратегию удобнее собирать `CpmBannerCampaign`/`BidStrategy` |
+| `CampaignDailyBudget` в теле `campaigns/add` | `DailyBudget` — deprecated escape-hatch, рабочий путь — недельный бюджет `set_weekly_budget` / `ManualCpm.WeeklySpendLimit` |
+| `api_version="v501"` в `client.ad_groups.create`, `client.ads.create` | сохранено; для `UnifiedAdGroup`/`UnifiedCampaign` версия подставляется автоматически |
+| импорт `GENDER_SEGMENT_NAMES` | удалён: SDK не зашивает локализованные названия половых сегментов |
+| `DemographicsSpec(gender=GENDER_FEMALE)` без `gender_names` | теперь обязательно `gender_names={GENDER_FEMALE: "<имя из справочника>"}`; справочник локализован, а SDK не догадывается локаль |
+
+Поведенческие изменения, которые стоит проверить при обновлении:
+
+- `ads.update_text(..., auto_clamp=True)` по-прежнему молча обрезает строку —
+  это сохранённый BC (D3). Новые билдеры (`ResponsiveAd`, `AdText` в
+  `create_with_payload`) не обрезают: превышение лимита — `ValidationError`.
+- `RegionIds=[0]` и пустой список регионов отвергаются локально (раньше уходили
+  в API и падали там).
+- `on_item_error` добавлен во все batch-мутации; значение по умолчанию `raise`
+  сохраняет прежнее поведение.
+- `client_login` необязателен: если он не задан, заголовок `Client-Login` не
+  отправляется. Для агентского доступа передавайте `client_login` как раньше.
+  - Реквизиты бюджета — строки/числа в валюте аккаунта; на провод уходят
+  единицы API ×1 000 000 (`to_money_units`), а `from_money_units` возвращает
+  `Decimal` с 6 знаками.
+- `DemographicsTarget.name` обязательно: без имени `to_retargeting_list()`
+  бросает `ValidationError` (SDK не придумывает имя сегмента за бизнес).
+- `DemographicsSpec` для таргетинга по полу требует `gender_names` — SDK не
+  локализует строки за бизнес (справочник `AudienceDemographicProfiles`
+  локализован; варианты — через
+  `TargetingService.demographic_segment_names`).
+- `RegionSelector.country_region` по‑прежнему `"RUC"` по умолчанию, но теперь
+  подпись и inline‑комментарий явно требуют переопределять для не‑российских
+  аккаунтов; докстринг больше не содержит частных бизнес‑примеров.
+- `set_weekly_budget_in_campaign` и `campaigns.set_weekly_budget` получили
+  `strategy=`. CPM‑ветка больше не молча перезаписывает чужую
+  `Network.BiddingStrategyType` → `MANUAL_CPM`; при конфликте бросает
+  `ValidationError`. Дополнительно: `campaigns.set_weekly_budget` для CPM‑кампании
+  с живой сетевой стратегией, **отличной от `MANUAL_CPM`** (например `MAX_CLICKS`),
+  требует явного `strategy=` — без него бросает `ValidationError` (weekly budget
+  поддерживается только при `MANUAL_CPM`; смена стратегии должна быть намеренной).
+- `TextCampaign`/`CpmBannerCampaign`/`UnifiedCampaign`/`PriorityGoal`/`CampaignBase.daily_budget_mode`/`AutotargetingSetting` больше не молчат о выбранных по умолчанию значениях: SDK эмиттирует `logging.warning`, а явный параметр (escape-hatch) подавляет его.
+- `readonly=True` блокирует все мутирующие методы, включая новые слои
+  (бюджеты, стратегии, изображения, таргетинг).
+- Денежные мутации требуют `confirm=True`; ограничение — `daily_budget_cap`
+  (`YANDEX_DIRECT_BUDGET_CAP`), по умолчанию проверка отключена.
+- Live-скрипты лежат в `scripts/` и не входят в `pytest`; они создают только
+  тестовые сущности (`E2E`/`TEST` в имени — иначе требуется `confirm=True`) и
+  удаляют созданное в `finally`.
+
 ## [Unreleased]
+
+## [1.0.0] - 2026-10-01
+
+### Added
+- **STAGE_05, этап 0 — фундамент:**
+  - `api_version` в `YandexDirectClient` и `Settings`: переключение между `v5`
+    (классическая РСЯ) и `v501` (ЕПК). Версия извлекается из `api_url`,
+    поэтому `https://api.direct.yandex.com/json/v5` + `api_version="v501"`
+    даёт корректный URL без дублирования сегмента версии.
+  - `client_login` стал необязательным: если он не задан, заголовок
+    `Client-Login` не отправляется (прямой доступ рекламодателя).
+  - `on_item_error="raise" | "collect"` для всех batch-мутаций
+    (`campaigns`, `ads`, `ad_groups`, `ad_group_items`, `ad_extensions`,
+    `audience_targets`, `retargeting_*`, `negative_keywords`): режим `collect`
+    возвращает `BatchResult(succeeded=..., failed=...)` с `ItemFailure`
+    (код, сообщение, ID объекта, `request_id`) вместо потери успешных
+    элементов. Значение по умолчанию — `raise` (прежнее поведение).
+  - `campaigns.create_many()` — создание нескольких кампаний с авто-чанкингом
+    по 10 (реальный лимит `campaigns/add`).
+  - Модуль `limits` — централизованные лимиты API (вместо разбросанных
+    констант); `services/_base.run_batches()` — общий batch-планировщик.
+  - Модуль `validation` — пред-отправочная валидация (ID, `RegionIds`,
+    имена, тексты, URL, суммы, enum). Отключается через `validate=False`
+    или `YANDEX_DIRECT_VALIDATE=0`.
+  - Модуль `logs` — structured logging (мутации на INFO, чтения на DEBUG,
+    поля `service`/`method`/`api_version`/`request_id`/`status_code`/
+    `duration_ms`) и redactor секретов (`Authorization`, `token`,
+    `client_secret`, токены `t1.`/`y0_`/`y1_`, `Bearer ...`).
+  - `BatchResult` и `ItemFailure` экспортированы из пакета.
+- **STAGE_05, этап 1 — справочники, гео и лимиты клиента:**
+  - `client.dictionaries` (`DictionariesService`): `geo_regions`,
+    `geo_hierarchy`, `interests`, `keywords`, `retargeting_lists`, `sites`,
+    `ad_types`, `time_zones`, `currency`, `bing_types` и эскапирующий
+    `dicts(field, params=...)` для новых словарей Яндекса.
+  - Модели справочников: `GeoRegion`, `Interest`, `RetargetingList`, `Site`,
+    `AdType`, `TimeZone`, `Currency`, `DictEntry` — все с `raw`.
+  - Дисковый кэш справочников: TTL 7 суток, каталог
+    `YANDEX_DIRECT_CACHE_DIR` (по умолчанию `~/.yandex-direct-api-client/cache`),
+    метод `clear_cache()`. Сбой доступа к файлу кэша не ломает клиент.
+  - `RegionSelector(include=[...], exclude=[...])` — единственный механизм
+    гео-таргетинга в SDK: принимает ID, коды и названия, резолвит их только
+    через справочник, отвергает выдуманные ID и неоднозначные названия с
+    `ValidationError`. Зашитых бизнес-регионов в коде нет (D5).
+    Хелпер `client.regions(selector)` и `RegionSelector.current(ad_group)`.
+  - `client.clients.get()` → `ClientInfo` с `Restrictions`, метод
+    `can_create_campaign(count)` для предварительной проверки лимитов.
+- **STAGE_05, слой 2А — классическая РСЯ (v5):** тела запросов сверены с
+  документацией (снимок 30.09.2026), поэтому билдеры строятся по фактическому
+  контракту API, а не по «наивной» структуре.
+  - `models/ad.py`: `AdImage` переименован в `ImageAdRef` (алиас `AdImage`
+    сохранён — BC для импортов); изображение адресуется хэшем
+    `AdImageHash`, а не `ImageId`.
+  - `money.py`: `to_money_units`, `from_money_units`, `monthly_to_weekly`
+    на `Decimal` — никаких `float`-артефактов в денежных полях.
+  - `models/campaign_payloads.py`: `CpmBannerCampaign` и `TextCampaign` +
+    диспетчер `build_campaign(kind, **kwargs)`. Типоспецифичные поля
+    кладутся во **вложенную** структуру (`CpmBannerCampaign`,
+    `TextCampaign`); бюджет — недельный и задаётся стратегией
+    (`BiddingStrategy.Network.ManualCpm.WeeklySpendLimit`); показы на
+    поиске у CPM-кампании выключены (`SERVING_OFF`); `StartDate`
+    обязателен при создании; имя — до 255 символов. `SmartCampaign`
+    удалён: `SMART_CAMPAIGN` через API не создаётся.
+  - `models/ad_group_payloads.py`: `CpmBannerAdGroup`
+    (`CpmBannerKeywordsAdGroup: {}` / `CpmBannerUserProfileAdGroup: {}`),
+    `TextAdGroup`, `SmartAdGroup` (`SmartAdGroup.FeedId` и т. п.) и
+    `build_ad_group(kind, **kwargs)`. Поле `Type` в `adgroups/add` больше
+    не отправляется — тип задаётся типовой структурой.
+  - `client.ad_images` (`AdImageService`): `add`, `add_from_file`,
+    `add_from_stream`, `get`, `list`, `delete` (алиас `remove`) — ровно те
+    методы, которые есть в API; `adimages/update` и `adimages/unbind` в
+    API отсутствуют. Проверка base64, формата, размера и имени до отправки.
+  - `client.creatives` (`CreativesService`): `get`, `list`,
+    `image_creative_ids` — чтение `CreativeId` для медийных объявлений.
+  - `CpmBannerAdBuilderAd` + `client.ads.create_rsya_banner(ad_group_id,
+    creative_id, ...)`: медийное объявление создаётся по креативу
+    (`Creative.CreativeId`); полей `Title`/`Text`/`ImageId` в `ads/add`
+    больше нет. `BannerAd` оставлен как модель чтения.
+  - `AdGroup.to_new_payload()` больше не отправляет `Type` (в `update` —
+    не отправлялся и раньше).
+  - `campaigns.create`/`create_many` и `ad_groups.create` принимают как
+    типизированные билдеры, так и сырые словари.
+- **STAGE_05, слой 2Б — ЕПК (UnifiedCampaign, v501):**
+  - `UnifiedCampaign` + `UnifiedStrategy` + `PriorityGoal`: вложенный блок
+    `UnifiedCampaign`, стратегии поиска и сетей с недельным бюджетом
+    (`BiddingStrategy.Search.AverageCpa.WeeklySpendLimit` и т. п.), счётчики
+    Метрики (`CounterIds`) и ключевые цели по ID (`PriorityGoals`);
+    обязательные поля стратегии (недельный бюджет, `GoalId`, ставка для
+    `AVERAGE_CPC`) проверяются до отправки, редкие поля — escape-hatch.
+  - `UnifiedAdGroup`: группа ЕПК с обязательной структурой
+    `UnifiedAdGroup: {OfferRetargeting}`; гео (`RegionIds`) задаётся здесь же,
+    поэтому ЕПК использует тот же `RegionSelector`, что и v5.
+  - `ResponsiveAd`: комбинаторное объявление ЕПК (1..7 заголовков по 56
+    символов, 1..3 текстов по 81, 1..5 `AdImageHashes`, расширения,
+    видеодополнения, `AgeLabel`); строки не обрезаются молча (D3).
+  - `campaigns.create_unified`, `update_unified`, `get_unified`,
+    `delete_unified` работают на `v501`; `campaigns.create` с билдером
+    `UnifiedCampaign` маршрутизируется на `v501` автоматически, v5-методы
+    остаются на `v5`.
+  - `ad_groups.create` и `ads.create` принимают `api_version`; для
+    `UnifiedAdGroup` версия подставляется сама.
+  - `client.ads.create_responsive_ad(...)` — узкий хелпер для ЕПК-объявления
+    с маршрутизацией на `v501`.
+- **STAGE_05, слой 3 — ставки и бюджеты:**
+  - `models/bid_strategy.py`: `BidStrategy` (типизированные стратегии с
+    `to_payload()`/`from_dict()`, escape-hatch `extra` для новых полей) и
+    `strategy_payload()` для передачи готовой секции стратегии словарём.
+    Обязательные поля стратегии (недельный бюджет, `GoalId`, ставка
+    `AVERAGE_CPC`) проверяются при сборке payload, поэтому стратегию можно
+    создать заранее, а бюджет передать отдельным аргументом метода.
+  - `services/budgets.py`: `CampaignBudget`, `read_budget`,
+    `set_weekly_budget_in_campaign`, `verify_weekly_budget`,
+    `ensure_money_confirmed`.
+  - `client.campaigns.set_weekly_budget(ids, budget, *, verify=True,
+    confirm=False)`, `set_daily_budget(...)`, `get_budgets(ids)`,
+    `set_bid_strategy(ids, strategy, *, weekly_budget=None, verify=True,
+    confirm=False)`. `verify=True` перечитывает бюджеты и бросает `ApiError`
+    с обоими значениями при расхождении; `get_budgets` читает v5, затем v501.
+  - `Settings.daily_budget_cap` (env `YANDEX_DIRECT_BUDGET_CAP`) и
+    `require_confirm_for_money` (env `YANDEX_DIRECT_REQUIRE_CONFIRM_MONEY`,
+    по умолчанию `True`) — предохранители денежных мутаций; превышение cap
+    блокируется до сети. Аргументы доступны и в конструкторе клиента.
+  - `AdGroupItemBids.bid_type`: `search` (поле `Bid`) или `network`
+    (поле `ContextBid`); `set_bid(..., bid_type=...)` — то же. Ставка
+    проверяется на положительность, точные лимиты валюты остаются в
+    справочнике `Currencies`.
+- **STAGE_05, слой 4 — таргетинг (демография, интересы, ретаргетинг):**
+  - `constants.py`: матрица допустимости «тип группы × вид нацеливания»
+    (`is_allowed`, `explain`, `keyword_conflict`) и префиксы типов интереса
+    (`segment_external_id`); несовместимые комбинации отсекаются до сети.
+  - `models/targeting.py`: спеки `DemographicsSpec` (возрастные сегменты и
+    пол), `InterestSpec` (`resolve(name)` с `ValidationError` при
+    неоднозначности), `RetargetingSpec`, модель `RetargetingList` и
+    типизированные билдеры `RetargetingTarget`, `InterestTarget`,
+    `DemographicsTarget`, `ContextTarget`.
+  - `ContextTarget` сообщает `ValidationError`: нацеливания по контексту
+    страницы в Direct API v5 нет — `audiencetargets` поддерживает только
+    `RetargetingListId` и `InterestId`.
+  - `services/retargeting_lists.py` + `client.retargeting_lists`:
+    `retargetinglists` add/update/delete/get, фильтр по типам, подбор
+    сегментов по `AvailableForTargetsInAdGroupTypes`.
+  - `services/targeting.py` + `client.targeting`: `resolve_demographics`,
+    `resolve_interest`, `demographic_segment_names`, сборка условий
+    нацеливания и `create_audience_target` (сегмент `AUDIENCE` → условие).
+  - `dictionaries`: `audience_demographic_profiles()`, `audience_interests()`,
+    `audience_criteria_types()`, `audience_profiles_of_type()` +
+    модели `AudienceDemographicProfile`, `AudienceInterestSegment`,
+    `AudienceCriteriaType`.
+  - `AutotargetingSetting` и группы `DynamicSiteAdGroup`,
+    `DynamicFeedAdGroup` (`AutotargetingCategories` в `adgroups/add`).
+- **STAGE_05, слой 5 — E2E-сборка запуска в `scripts/` (вне пакета):**
+  - `scripts/_launch_common.py`: `LaunchResult`/`LaunchStep`/`PartialIds`
+    (частичные ID для компенсации), план запуска (`plan_lines`), `preflight()`
+    (параметры клиента и лимиты), `resolve_geo()`, `moderate_ads()`,
+    `resume_ads()`, `poll_ads()` и `rollback()` — компенсация без исключений:
+    `suspend` → `archive` → `campaigns/delete` (только при `confirm=True`) →
+    `adimages/delete` загруженных в этом запуске изображений.
+  - `ReuseCache` — кэш «SHA-256 содержимого файла → ID созданной сущности»;
+    повторный запуск с тем же файлом не грузит изображение второй раз.
+    Каталог: `YANDEX_DIRECT_LAUNCH_CACHE_DIR`; ошибки ФС не ломают запуск.
+  - `scripts/launch_rsy.py` (сценарий 2А): `launch(client, spec, *,
+    dry_run=False, poll_interval=30, poll_timeout=3600, confirm=False)`.
+    Требует готовый креатив (`creative_id` или `creative_name`), потому что
+    `creatives/add` баннерные креативы не создаёт (D11).
+  - `scripts/launch_epk.py` (сценарий 2Б, основной автозапуск): `adimages/add`
+    → `UnifiedCampaign` (v501) → `UnifiedAdGroup` → `ResponsiveAd` (v501) →
+    `ads/moderate` (v501).
+  - `dry_run=True` — только валидация и план, **ноль** сетевых вызовов;
+    ошибка любого шага фиксируется в отчёте, а не выбрасывается наружу.
+  - Имя запуска без маркеров `E2E`/`TEST`/`ТЕСТ` требует `confirm=True`
+    (D9: автоматический запуск кампании реального бизнеса запрещён).
+  - Новые точки входа запускаются как модули: `python -m scripts.launch_rsy`,
+    `python -m scripts.launch_epk`.
+- **STAGE_05, слой 5 — расширение API для ЕПК (не breaking):**
+  - `ads.suspend()`, `ads.resume()`, `ads.archive()`, `ads.moderate()` и
+    `campaigns.suspend()`, `campaigns.archive()` принимают необязательный
+    `api_version` (по умолчанию `None` — `v5`). Нужен для управления
+    объявлениями и кампаниями ЕПК через `v501`.
+- **STAGE_05, этап 7 — L1/L2 mock-тесты по всем слоям:**
+  - `tests/test_task04_stage7.py` (70 тестов): снапшоты payload'ов
+    классической РСЯ, поведение `readonly` по полному списку мутирующих
+    методов, negative-кейсы пред-отправочной валидации, справочники,
+    кэш, ретаргетинг-листы, расширения, отчёты, версии API.
+  - `tests/test_task04_stage7_quality.py` (52 теста): OAuth-хелперы
+    (`refresh_token`, code-flow, обработчик callback, CLI, поиск свободного
+    порта), ветви `ad_extensions`/`audience_targets`/`retargeting_conditions`,
+    денежные операции кампаний (`set_weekly_budget`, `set_daily_budget`,
+    `set_bid_strategy`, маршрутизация ЕПК в `v501`), модели объявлений
+    (`AdText`, `ImageAdRef`, `CpmBannerAdBuilderAd`, `ResponsiveAd`).
+  - `tests/test_task04_stage8.py` (19 тестов): сценарии live-скрипта
+    (гео, обязательные аргументы, отчёт о провалах, CLI, контур безопасности).
+  - Итог: 638 тестов, покрытие пакета 96 %, новые модули ≥ 90 %;
+    `ruff check .`, `mypy yandex_direct_api_client` и `pytest` — зелёные.
+- **STAGE_05, этап 8 — permanent live-скрипт:**
+  - `scripts/smoke_campaign_live.py --scenario S-01…S-05` (или `all`):
+    авторизация и лимиты, гео-проверка, жизненный цикл классической РСЯ
+    (`v5`), жизненный цикл ЕПК (`v501`), отчёт по кампании. Сценарии создают
+    только тестовые сущности в `DRAFT`, не включают показы, выполняют
+    самоочистку через `rollback(..., confirm=True)` и возвращают ненулевой код
+    при провале; OAuth-токен не выводится никогда.
+- **STAGE_05, этап 9 — документация и релиз:**
+  - README: поддерживаемые сервисы, таблица `v5` vs `v501`, примеры создания
+    кампании РСЯ и ЕПК, `readonly`/`confirm=True`, денежные операции,
+    гео-таргетинг, live smoke с описанием ограничений.
+  - Миграционные заметки `0.5.x → 1.0.0` (см. раздел выше).
+  - Отчёт этапа: `tasks/task04_report.md`.
+
+### Changed
+- Ошибки классифицируются по категориям (`auth`, `rate_limit`, `retryable`,
+  `validation`, `fatal`) с хелперами `is_auth`/`is_retryable`/
+  `is_validation`/`is_fatal`; `ApiError` при non-2xx теперь извлекает
+  `error_code` и `details` из JSON-тела ответа.
+- `ApiError`, `ValidationError` и тексты логов проходят через redactor:
+  OAuth-токен не попадает в `str(exception)`, `repr` и логи.
+
+### Fixed
+- `region_ids=[0]` и пустой `RegionIds` отвергаются локально, до запроса.
+- Лимит `campaigns/add` приведён к фактическим 10 кампаниям за вызов.
+- Перегрузки `campaigns.create()` принимают билдеры кампаний
+  (`CampaignInput`), а не только словари — сигнатура реализации всегда это
+  допускала, аннотация типов расходилась с поведением.
 
 ## [0.5.0] - 2026-09-23
 
