@@ -27,14 +27,16 @@ from scripts import smoke_campaign_live as smoke  # noqa: E402
 from yandex_direct_api_client import YandexDirectClient  # noqa: E402
 
 V5 = "https://api.direct.yandex.com/json/v5"
+V501 = "https://api.direct.yandex.com/json/v501"
 CLIENTS_URL = f"{V5}/clients/"
-DICTIONARIES_URL = f"{V5}/dictionaries/"
+DICTIONARIES_URL_V5 = f"{V5}/dictionaries/"
+DICTIONARIES_URL_V501 = f"{V501}/dictionaries/"
 CAMPAIGNS_URL = f"{V5}/campaigns/"
 
 def _geo_payload() -> Dict[str, Any]:
-    """Справочник регионов РФ в формате API (ключи `GeoRegionId`/`GeoRegionName`)."""
+    """Справочник регионов РФ в формате API v501 (ключи `GeoRegionId`/`GeoRegionName`/`GeoRegionType`/`ParentId`)."""
     regions: List[Dict[str, Any]] = [
-        {"GeoRegionId": 225, "GeoRegionName": "Россия", "CountryRegion": "RUC"},
+        {"GeoRegionId": 225, "GeoRegionName": "Россия", "GeoRegionType": "Country", "ParentId": 1},
     ]
     for name in (
         "Москва",
@@ -46,8 +48,8 @@ def _geo_payload() -> Dict[str, Any]:
             {
                 "GeoRegionId": 100 + len(regions),
                 "GeoRegionName": name,
-                "ParentGeoRegionId": 225,
-                "CountryRegion": "RUC",
+                "GeoRegionType": "City" if "Москва" in name or "Санкт-Петербург" in name else "Region",
+                "ParentId": 225,
             }
         )
     for name in smoke.PROBE_REGIONS:
@@ -55,8 +57,8 @@ def _geo_payload() -> Dict[str, Any]:
             {
                 "GeoRegionId": 200 + len(regions),
                 "GeoRegionName": name,
-                "ParentGeoRegionId": 225,
-                "CountryRegion": "RUC",
+                "GeoRegionType": "Region",
+                "ParentId": 225,
             }
         )
     for index in range(1, 81):
@@ -64,14 +66,14 @@ def _geo_payload() -> Dict[str, Any]:
             {
                 "GeoRegionId": 1000 + index,
                 "GeoRegionName": f"Область {index}",
-                "ParentGeoRegionId": 225,
-                "CountryRegion": "RUC",
+                "GeoRegionType": "Region",
+                "ParentId": 225,
             }
         )
     return {"result": {"GeoRegions": regions}}
 
 
-#: Ответ `dictionaries/getGeoRegions` для сценария гео.
+#: Ответ `dictionaries/getGeoRegions` (v501) для сценария гео.
 GEO_REGIONS = _geo_payload()
 
 
@@ -106,7 +108,11 @@ def _mock_clients() -> None:
     responses.add(
         responses.POST,
         CLIENTS_URL,
-        json={"result": {"Login": "owner", "Currency": "RUB", "Restrictions": []}},
+        json={
+            "result": {
+                "Clients": [{"ClientInfo": "owner", "Restrictions": []}]
+            }
+        },
     )
 
 
@@ -141,8 +147,8 @@ def test_scenario_client_reports_limits(tmp_path: Path) -> None:
     """S-01 читает лимиты клиента и справочник регионов."""
     _mock_clients()
     responses.add(responses.POST, CAMPAIGNS_URL, json={"result": {"Campaigns": []}})
-    responses.add(responses.POST, DICTIONARIES_URL, json=GEO_REGIONS)
-    responses.add(responses.POST, DICTIONARIES_URL, json=GEO_REGIONS)
+    responses.add(responses.POST, DICTIONARIES_URL_V501, json=GEO_REGIONS)
+    responses.add(responses.POST, DICTIONARIES_URL_V501, json=GEO_REGIONS)
     with _client(tmp_path / "cache") as client:
         smoke.scenario_client(client, _args())
 
@@ -152,7 +158,7 @@ def test_scenario_client_fails_without_regions(tmp_path: Path) -> None:
     """Пустой справочник регионов — провал сценария, а не тихий успех."""
     _mock_clients()
     responses.add(responses.POST, CAMPAIGNS_URL, json={"result": {"Campaigns": []}})
-    responses.add(responses.POST, DICTIONARIES_URL, json={"result": {"GeoRegions": []}})
+    responses.add(responses.POST, DICTIONARIES_URL_V501, json={"result": {"GeoRegions": []}})
     with _client(tmp_path / "cache") as client:
         with pytest.raises(smoke.SmokeError, match="S-01"):
             smoke.scenario_client(client, _args())
@@ -165,7 +171,7 @@ def test_scenario_client_fails_without_regions(tmp_path: Path) -> None:
 def test_scenario_geo_resolves_outside_capitals(tmp_path: Path) -> None:
     """S-02 резолвит и пять регионов, и «всю РФ кроме четырёх»."""
     for _ in range(6):
-        responses.add(responses.POST, DICTIONARIES_URL, json=GEO_REGIONS)
+        responses.add(responses.POST, DICTIONARIES_URL_V501, json=GEO_REGIONS)
     with _client(tmp_path / "cache") as client:
         smoke.scenario_geo(client, _args())
 
@@ -183,6 +189,12 @@ def test_scenario_geo_detects_excluded_region(
         return [1, 5, 6]
 
     monkeypatch.setattr(smoke.RegionSelector, "resolve", fake_resolve)
+    # Мокаем dictionaries.geo_regions для _resolve_excluded_region_ids
+    responses.add(
+        responses.POST,
+        "https://api.direct.yandex.com/json/v501/dictionaries/",
+        json={"result": {"GeoRegions": [{"GeoRegionId": 1, "GeoRegionName": "Москва", "GeoRegionType": "City", "ParentId": 225}]}},
+    )
     with _client(tmp_path / "cache") as client:
         with pytest.raises(smoke.SmokeError, match="исключённые регионы"):
             smoke.scenario_geo(client, _args())

@@ -150,8 +150,52 @@ A2 (`GENDER_SEGMENT_NAMES` удалены) и A5.2 (body-level guard в
 `set_weekly_budget_in_campaign`) остаются в силе. D2 закрыт: побочный эффект
 денежной мутации больше не скрыт — вызов без `strategy=` падает с понятной
 ошибкой. +3 unit‑теста (`test_set_weekly_budget_cpm_with_other_strategy_requires_explicit`,
-`test_set_weekly_budget_cpm_explicit_manual_cpm_overwrites_other`,
+`test_set_weekly_budget_cpm_explicit_manual_cpm_overrides_other`,
 `test_set_weekly_budget_cpm_already_manual_cpm_succeeds`).
+
+### D3. `services/clients.py` — неверный контракт `clients/get` — ИСПРАВЛЕН (L3, 09.10.2026)
+
+При первом живом `S-01` вызов `clients/get` падал с `ApiError: Invalid request`.
+SDK отправлял `FieldNames = [Id, Login, Name, Currency, TimeZone, Agency,
+Restrictions]` и парсил ответ как плоский объект клиента. Живой API:
+
+- принимает ровно два имени — `ClientInfo` и `Restrictions` (иные → `InvalidRequest`);
+- `ClientInfo` возвращает **строкой** (отображаемое имя клиента), а не объектом;
+- `Restrictions` — список `{Element, Value}` (12 записей), а не словарь;
+- поля `Id`/`Login`/`Currency`/`TimeZone` сервис вообще не отдаёт.
+
+**Фикс (минимальный, сигнатуры публичных методов не меняются):** `get()` шлёт
+`[ClientInfo, Restrictions]` и берёт первый элемент списка `Clients`;
+`ClientInfo.from_dict` читает имя из строковой секции; `restrictions` разбирает
+список `{Element, Value}` (словарная форма оставлена escape-hatch для моков).
+`preflight.describe()` честно печатает `клиент=?, валюта=?` — API эти поля не
+возвращает. Мок-тесты `test_task04_stage1/5/8` приведены к фактической форме.
+Проверено: `ruff`/`mypy --strict` чисто, `pytest` — **660 passed**; live `S-01`
+часть «авторизация + лимиты» проходит (`кампааний=23`, лимиты распарсены).
+
+### D4. `services/dictionaries.py` + `region_selector.py` — дрейф контракта справочников — НАЙДЕН (L3, 09.10.2026), требует решения владельца
+
+Live `S-01` (гео-часть) и `S-02` падают: справочник `dictionaries` построен на
+устаревшем контракте и сверялся только mock-моками. Актуальная документация и
+живой запрос показывают:
+
+- сервис переехал на **`v501`**; формат запроса — `params: {"DictionaryNames":
+  [...]}`, а не под-объекты `{"getGeoRegions": {...}}` (иначе — «Omitted required
+  parameter DictionaryNames»);
+- **нет фильтра по стране** и поля `CountryRegion` в ответе: `GeoRegions` отдаёт
+  всё мировое дерево (17 344 записи) с полями `GeoRegionId/GeoRegionName/
+  GeoRegionType/ParentId`; РФ — поддерево узла `Country` «Russia» (`GeoRegionId=225`);
+- имена регионов **англоязычны по умолчанию**; `Accept-Language: ru` (в SDK не
+  отправляется) возвращает русские («Москва», «Санкт-Петербург»);
+- словарей `AdTypes`/`Sites`/`RetargetingLists`/`BingTypes`/`Keywords` в
+  `dictionaries/get` **больше нет**.
+
+Следствие: `geo_regions("RUC")` → `InvalidRequest`; `RegionSelector.resolve()`
+не может построить «вся РФ кроме четырёх» (нет страновой выборки). Это **миграция
+слоя 1** со сменой публичного контракта (`dictionaries`-методы, семантика
+`geo_regions`, заголовок локали в транспорте, судьба удалённых словарей) → по
+AGENTS.md §6 breaking → MAJOR + `CHANGELOG`, нужно явное решение владельца.
+В текущем diff **не выполнялась** (не молчаливая правка проверяемого 1.0.0).
 
 ---
 
@@ -225,12 +269,21 @@ A2 (`GENDER_SEGMENT_NAMES` удалены) и A5.2 (body-level guard в
   `pytest` — **660 passed** (+3 D2).
 - ✅ **D1** починен (+2 теста).
 - ✅ **D2** закрыт по решению владельца (09.10.2026): CPM с не-`MANUAL_CPM` требует явного `strategy=`; service-level guard +3 теста.
-- ⏳ Живой прогон `scripts/smoke_campaign_live.py --scenario all` — ручной, не в `pytest`.
+- ✅ **D3** (`clients/get`) починен по живому прогону 09.10.2026: `[ClientInfo,
+  Restrictions]`, `Restrictions` из `{Element, Value}`; `pytest` — 660 passed.
+- ⛔ **D4** (`dictionaries` + `RegionSelector`) — live-прогон 09.10.2026 вскрыл
+  дрейф контракта (справочник на `v501`, `DictionaryNames`, нет страновой
+  выборки/`CountryRegion`, англ. имена без `Accept-Language`). Требует решения
+  владельца (breaking → MAJOR), в текущем diff не выполнялась.
+- ⏳ Живой прогон `scripts/smoke_campaign_live.py`: авторизация/лимиты подтверждены;
+  гео (`S-01`/`S-02`) и `S-03…S-05` ждут миграции D4.
 - ⏸️ Коммит/релиз 1.0.0 — ждут явного разрешения владельца.
 
 ### Дальнейшие шаги
-1. Живой прогон `scripts/smoke_campaign_live.py --scenario all` → зафиксировать в `task04_report.md` §8.
-2. Проверить D1 на живом `campaigns/get` для `TEXT_CAMPAIGN`.
+1. **D4:** принять решение по миграции `dictionaries`/`RegionSelector` на `v501`
+   (AGENTS.md §6) — затем допрогонеть `scripts/smoke_campaign_live.py --scenario all`
+   и зафиксировать вывод в `task04_report.md` §8.
+2. Проверить D1 на живом `campaigns/get` для `TEXT_CAMPAIGN` (после снятия D4-блокировки гео).
 3. `ruff check .`, `mypy yandex_direct_api_client`, `pytest` — уже зелёные (660 passed).
 4. D2 решён — уточнять больше не нужно.
 

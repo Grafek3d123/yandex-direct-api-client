@@ -12,18 +12,23 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
-from ._helpers import to_bool, to_int, to_optional_int, to_str
+from ._helpers import to_int, to_optional_int, to_str
 
 
 @dataclass
 class GeoRegion:
-    """Регион из справочника `getGeoRegions`."""
+    """Регион из справочника `GeoRegions` (`dictionaries/get`, v501).
+
+    Фактический контракт (сверен живым запросом): запись содержит
+    `GeoRegionId`, `GeoRegionName`, `GeoRegionType`, `ParentId`. Иерархия
+    строится по `ParentId`: `World` → `Country` → федеральные округа →
+    субъекты → населённые пункты.
+    """
 
     id: int
     name: str
     parent_id: Optional[int] = None
-    country_region: Optional[str] = None
-    is_area: bool = False
+    region_type: Optional[str] = None
     raw: Dict[str, Any] = field(default_factory=dict, repr=False)
 
     @classmethod
@@ -36,25 +41,30 @@ class GeoRegion:
         return cls(
             id=to_int(d.get("GeoRegionId")),
             name=to_str(d.get("GeoRegionName")),
-            parent_id=to_optional_int(d.get("ParentGeoRegionId")),
-            country_region=d.get("CountryRegion"),
-            is_area=to_bool(d.get("IsArea")),
+            parent_id=to_optional_int(d.get("ParentId")),
+            region_type=d.get("GeoRegionType"),
             raw=d,
         )
 
     @property
     def is_top_level(self) -> bool:
-        """Регион верхнего уровня (область/край, без родителя)."""
-        return self.parent_id is None
+        """Регион верхнего уровня (узел `Country`). В v501 у Country есть ParentId (World),
+        поэтому проверяем по типу региона.
+        """
+        return (self.region_type or "").lower() == "country"
 
 
 @dataclass
 class Interest:
-    """Интерес из справочника `getInterests`."""
+    """Интерес из справочника `Interests` (`dictionaries/get`, v501).
+
+    Фактический контракт: ``{"InterestId", "ParentId", "Name", "IsTargetable"}``.
+    """
 
     id: int
     name: str
-    intent_id: Optional[int] = None
+    parent_id: Optional[int] = None
+    is_targetable: Optional[str] = None
     raw: Dict[str, Any] = field(default_factory=dict, repr=False)
 
     @classmethod
@@ -66,8 +76,9 @@ class Interest:
         """
         return cls(
             id=to_int(d.get("InterestId")),
-            name=to_str(d.get("InterestName")),
-            intent_id=to_optional_int(d.get("IntentId")),
+            name=to_str(d.get("Name") or d.get("InterestName")),
+            parent_id=to_optional_int(d.get("ParentId")),
+            is_targetable=d.get("IsTargetable"),
             raw=d,
         )
 
@@ -103,32 +114,6 @@ class RetargetingList:
 
 
 @dataclass
-class Site:
-    """Сайт из справочника `getSites`."""
-
-    id: int
-    name: str
-    url: Optional[str] = None
-    status: Optional[str] = None
-    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
-
-    @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "Site":
-        """Разобрать запись справочника сайтов.
-
-        :param d: JSON-запись сайта.
-        :return: типизированная модель сайта.
-        """
-        return cls(
-            id=to_int(d.get("Id") or d.get("SiteId")),
-            name=to_str(d.get("Name")),
-            url=d.get("Url"),
-            status=d.get("Status"),
-            raw=d,
-        )
-
-
-@dataclass
 class AdType:
     """Тип объявления из справочника `getAdTypes`."""
 
@@ -154,11 +139,14 @@ class AdType:
 
 @dataclass
 class TimeZone:
-    """Часовой пояс из справочника `getTimeZones`."""
+    """Часовой пояс из справочника `TimeZones` (`dictionaries/get`, v501).
+
+    Фактический контракт: ``{"TimeZone", "TimeZoneName", "UtcOffset"}``.
+    """
 
     name: str
-    offset: Optional[int] = None
-    zone_id: Optional[int] = None
+    display_name: Optional[str] = None
+    utc_offset: Optional[int] = None
     raw: Dict[str, Any] = field(default_factory=dict, repr=False)
 
     @classmethod
@@ -169,16 +157,48 @@ class TimeZone:
         :return: типизированная модель часового пояса.
         """
         return cls(
+            name=to_str(d.get("TimeZone") or d.get("TimeZoneName")),
+            display_name=d.get("TimeZoneName"),
+            utc_offset=to_optional_int(d.get("UtcOffset")),
+            raw=d,
+        )
+
+
+@dataclass
+class Site:
+    """Сайт клиента из справочника `Sites` (`dictionaries/get`, v501).
+
+    Фактический контракт: ``{"Id", "Name", "Url", "Status"}``.
+    """
+
+    id: int
+    name: str
+    url: Optional[str] = None
+    status: Optional[str] = None
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "Site":
+        """Разобрать запись справочника сайтов.
+
+        :param d: JSON-запись сайта.
+        :return: типизированная модель сайта.
+        """
+        return cls(
+            id=to_int(d.get("Id")),
             name=to_str(d.get("Name")),
-            offset=to_optional_int(d.get("Offset")),
-            zone_id=to_optional_int(d.get("TimeZoneId")),
+            url=d.get("Url"),
+            status=d.get("Status"),
             raw=d,
         )
 
 
 @dataclass
 class Currency:
-    """Валюта клиента/аккаунта из справочника `getCurrency`."""
+    """Валюта из справочника `Currency` (`dictionaries/get`, v501).
+
+    Фактический контракт: ``{"Currency", "Name"}``.
+    """
 
     currency: str
     name: Optional[str] = None

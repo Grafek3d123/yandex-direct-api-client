@@ -51,20 +51,22 @@ ADS_URL = f"{V5}/ads/"
 ADS_501_URL = f"{V501}/ads/"
 ADIMAGES_URL = f"{V5}/adimages/"
 CREATIVES_URL = f"{V5}/creatives/"
-DICTIONARIES_URL = f"{V5}/dictionaries/"
+DICTIONARIES_URL_V5 = f"{V5}/dictionaries/"
+DICTIONARIES_URL_V501 = f"{V501}/dictionaries/"
 
-#: Справочник регионов: Москва, МО и ещё несколько.
+#: Справочник регионов: Москва, МО и ещё несколько (v501 формат).
 REGIONS: Dict[str, Any] = {
     "result": {
         "GeoRegions": [
-            {"GeoRegionId": 225, "GeoRegionName": "Россия", "CountryRegion": "RUC"},
-            {"GeoRegionId": 213, "GeoRegionName": "Москва", "CountryRegion": "RUC"},
+            {"GeoRegionId": 225, "GeoRegionName": "Россия", "GeoRegionType": "Country", "ParentId": 1},
+            {"GeoRegionId": 213, "GeoRegionName": "Москва", "GeoRegionType": "City", "ParentId": 225},
             {
                 "GeoRegionId": 214,
                 "GeoRegionName": "Московская область",
-                "CountryRegion": "RUC",
+                "GeoRegionType": "Region",
+                "ParentId": 225,
             },
-            {"GeoRegionId": 2, "GeoRegionName": "Санкт-Петербург", "CountryRegion": "RUC"},
+            {"GeoRegionId": 2, "GeoRegionName": "Санкт-Петербург", "GeoRegionType": "City", "ParentId": 225},
         ]
     }
 }
@@ -72,16 +74,15 @@ REGIONS: Dict[str, Any] = {
 #: Ответ `clients/get` без ограничений.
 CLIENT: Dict[str, Any] = {
     "result": {
-        "Id": 123,
-        "Login": "test-client",
-        "Name": "Тестовый клиент",
-        "Currency": "RUB",
-        "TimeZone": "Europe/Moscow",
-        "Agency": "no",
-        "Restrictions": {
-            "CAMPAIGNS_TOTAL_PER_CLIENT": 100,
-            "CAMPAIGNS_UNARCHIVED_PER_CLIENT": 50,
-        },
+        "Clients": [
+            {
+                "ClientInfo": "Тестовый клиент",
+                "Restrictions": [
+                    {"Element": "CAMPAIGNS_TOTAL_PER_CLIENT", "Value": 100},
+                    {"Element": "CAMPAIGNS_UNARCHIVED_PER_CLIENT", "Value": 50},
+                ],
+            }
+        ]
     }
 }
 
@@ -200,7 +201,7 @@ def _mock_preflight(rsps: Any, *, geo: bool = True) -> None:
     rsps.add(responses.POST, CLIENTS_URL, json=CLIENT)
     rsps.add(responses.POST, CAMPAIGNS_URL, json=CAMPAIGNS)
     if geo:
-        rsps.add(responses.POST, DICTIONARIES_URL, json=REGIONS)
+        rsps.add(responses.POST, DICTIONARIES_URL_V501, json=REGIONS)
 
 
 def _rsya_spec(**kwargs: Any) -> RsyaLaunchSpec:
@@ -517,7 +518,11 @@ def test_rollback_without_confirm_skips_delete() -> None:
 
 @responses.activate
 def test_rollback_reports_errors_instead_of_raising(image_file: Path) -> None:
-    """Ошибка компенсации попадает в отчёт, а не бросается наружу."""
+    """Ошибка компенсации попадает в отчёт, а не бросается наружу.
+
+    suspend/archive ошибки теперь перехватываются и игнорируются (для DRAFT
+    они ожидаемы). delete ошибки всё равно попадают в errors.
+    """
     _mock_preflight(responses, geo=False)
     responses.add(
         responses.POST,
@@ -526,6 +531,18 @@ def test_rollback_reports_errors_instead_of_raising(image_file: Path) -> None:
             "result": {
                 "SuspendResults": [
                     {"Id": 1101, "Errors": [{"Code": "X", "Message": "нельзя"}]}
+                ]
+            }
+        },
+    )
+    # Мокаем delete campaign ошибку
+    responses.add(
+        responses.POST,
+        CAMPAIGNS_501_URL,
+        json={
+            "result": {
+                "DeleteResults": [
+                    {"Id": 1101, "Errors": [{"Code": "Y", "Message": "нельзя удалить"}]}
                 ]
             }
         },
@@ -539,10 +556,10 @@ def test_rollback_reports_errors_instead_of_raising(image_file: Path) -> None:
                 ad_image_hashes=["hash-image-1"],
                 unified=True,
             ),
-            confirm=False,
+            confirm=True,  # чтобы delete campaign вызывался
         )
     assert report.ok is False
-    assert any("suspend campaign" in message for message in report.errors)
+    assert any("delete campaign" in message for message in report.errors)
 
 
 @responses.activate

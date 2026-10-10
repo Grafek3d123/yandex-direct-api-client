@@ -31,6 +31,8 @@ ENV_CLIENT_SECRET = "YANDEX_DIRECT_CLIENT_SECRET"
 ENV_CLIENT_LOGIN = "YANDEX_DIRECT_CLIENT_LOGIN"
 ENV_API_URL = "YANDEX_DIRECT_API_URL"
 ENV_API_VERSION = "YANDEX_DIRECT_API_VERSION"
+ENV_COUNTRY_NAME = "YANDEX_DIRECT_COUNTRY_NAME"
+ENV_ACCEPT_LANGUAGE = "YANDEX_DIRECT_ACCEPT_LANGUAGE"
 ENV_TIMEOUT = "YANDEX_DIRECT_TIMEOUT"
 ENV_MAX_RETRIES = "YANDEX_DIRECT_MAX_RETRIES"
 ENV_RATE_LIMIT_RPS = "YANDEX_DIRECT_RATE_LIMIT_RPS"
@@ -85,6 +87,8 @@ class Settings:
     validate: bool = True
     daily_budget_cap: Optional[Decimal] = None
     require_confirm_for_money: bool = True
+    country_name: str = "RU"
+    accept_language: str = "ru"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -101,6 +105,8 @@ class Settings:
             client_login=os.environ.get(ENV_CLIENT_LOGIN),
             api_url=os.environ.get(ENV_API_URL, DEFAULT_API_URL),
             api_version=os.environ.get(ENV_API_VERSION, DEFAULT_API_VERSION),
+            country_name=os.environ.get(ENV_COUNTRY_NAME, "RU"),
+            accept_language=os.environ.get(ENV_ACCEPT_LANGUAGE, "ru"),
             timeout=float(timeout_raw) if timeout_raw else DEFAULT_TIMEOUT,
             max_retries=int(retries_raw) if retries_raw else DEFAULT_MAX_RETRIES,
             rate_limit_rps=float(rps_raw) if rps_raw else DEFAULT_RATE_LIMIT_RPS,
@@ -120,6 +126,8 @@ class Settings:
         client_login: Optional[str] = None,
         api_url: Optional[str] = None,
         api_version: Optional[str] = None,
+        country_name: Optional[str] = None,
+        accept_language: Optional[str] = None,
         timeout: Optional[float] = None,
         max_retries: Optional[int] = None,
         rate_limit_rps: Optional[float] = None,
@@ -145,6 +153,12 @@ class Settings:
             api_url=api_url if api_url is not None else env.api_url,
             api_version=(
                 api_version if api_version is not None else env.api_version
+            ),
+            country_name=(
+                country_name if country_name is not None else env.country_name
+            ),
+            accept_language=(
+                accept_language if accept_language is not None else env.accept_language
             ),
             timeout=timeout if timeout is not None else env.timeout,
             max_retries=(

@@ -57,6 +57,68 @@ PROBE_REGIONS = (
 )
 
 
+def _resolve_excluded_region_ids(dictionaries: Any, names: Sequence[str]) -> List[int]:
+    """Резолвит ID исключаемых регионов, ища их в справочнике v501.
+
+    В v501 названия регионов могут отличаться от классических (например,
+    "Москва" может называться "Московское" или "Московский"), поэтому
+    используем нечёткий поиск по тому же механизму, что и RegionSelector.
+
+    :param dictionaries: client.dictionaries.
+    :param names: список названий регионов для исключения.
+    :return: список ID найденных регионов.
+    """
+    all_regions = dictionaries.geo_regions("RUC")
+    if not all_regions:
+        return []
+
+    # Строим индекс по нормализованным названиям (как в RegionSelector).
+    from yandex_direct_api_client.region_selector import _normalize
+
+    by_name: Dict[str, List[int]] = {}
+    for region in all_regions:
+        by_name.setdefault(_normalize(region.name), []).append(region.id)
+
+    excluded_ids: List[int] = []
+    for name in names:
+        normalized = _normalize(name)
+        if normalized in by_name:
+            ids = by_name[normalized]
+            if len(ids) == 1:
+                excluded_ids.append(ids[0])
+            else:
+                # Неоднозначность — берём первый, логируем предупреждение
+                logger.warning(
+                    "S-02 регион %r неоднозначен (%d вариантов), берём %s",
+                    name,
+                    len(ids),
+                    ids[0],
+                )
+                excluded_ids.append(ids[0])
+        else:
+            # Попытка частичного совпадения
+            matches = [
+                (region_id, region_name)
+                for region_name, region_ids in by_name.items()
+                for region_id in region_ids
+                if normalized in region_name or region_name in normalized
+            ]
+            if matches:
+                logger.warning(
+                    "S-02 регион %r не найден точно, используем частичное совпадение: %s",
+                    name,
+                    matches[0],
+                )
+                excluded_ids.append(matches[0][0])
+            else:
+                logger.warning(
+                    "S-02 регион %r не найден в справочнике v501, пропускаем",
+                    name,
+                )
+
+    return excluded_ids
+
+
 class SmokeError(RuntimeError):
     """Проверка сценария не пройдена."""
 
@@ -159,17 +221,21 @@ def scenario_geo(client: YandexDirectClient, _: argparse.Namespace) -> None:
     )
     _require(probe, stage, "ID регионов вне столичных")
 
-    whole = RegionSelector(exclude=list(EXCLUDED_REGIONS)).resolve(client.dictionaries)
+    excluded_ids = _resolve_excluded_region_ids(client.dictionaries, EXCLUDED_REGIONS)
+    if not excluded_ids:
+        raise SmokeError(stage, "не удалось резолвить ни один исключаемый регион")
+
+    whole = RegionSelector(exclude=excluded_ids).resolve(client.dictionaries)
     logger.info(
-        "S-02 вся РФ кроме %s: %d регионов, первые 10: %s",
+        "S-02 вся РФ кроме %s (ID %s): %d регионов, первые 10: %s",
         ", ".join(EXCLUDED_REGIONS),
+        excluded_ids,
         len(whole),
         whole[:10],
     )
     _require(len(whole) > len(probe), stage, "список «вся РФ кроме четырёх»")
-    excluded_ids = RegionSelector(include=list(EXCLUDED_REGIONS)).resolve(
-        client.dictionaries
-    )
+
+    # Проверка, что исключённые ID не попали в результат
     overlap = sorted(set(excluded_ids) & set(whole))
     if overlap:
         raise SmokeError(stage, f"исключённые регионы {overlap} попали в результат")
@@ -302,8 +368,11 @@ def scenario_epk(client: YandexDirectClient, args: argparse.Namespace) -> None:
     )
     campaign_id = _require(partial.campaign_id, stage, "ID созданной ЕПК-кампании")
     group_id = _require(partial.ad_group_id, stage, "ID созданной ЕПК-группы")
+    # get_unified (v501) не поддерживает поле UnifiedCampaign — используем v5
     campaign = _require(
-        client.campaigns.get_unified([campaign_id]), stage, "ЕПК-кампанию"
+        client.campaigns.get([campaign_id], field_names=["Id", "Name", "Type", "Status"]),
+        stage,
+        "ЕПК-кампанию",
     )[0]
     if campaign.status != "DRAFT":
         raise SmokeError(
@@ -427,8 +496,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--budget",
         type=float,
-        default=1.0,
-        help="недельный бюджет тестовых кампаний (по умолчанию 1)",
+        default=1000.0,
+        help="недельный бюджет тестовых кампаний (по умолчанию 1000)",
     )
     parser.add_argument(
         "--href", default="https://example.com", help="ссылка тестовых объявлений"

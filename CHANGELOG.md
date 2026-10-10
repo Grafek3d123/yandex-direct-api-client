@@ -88,6 +88,29 @@ New safety semantics:
 
 ## [1.0.0] - 2026-10-01
 
+### Breaking (Layer 1 migration to v501 dictionaries contract)
+- **`client.dictionaries`** (`DictionariesService`): запрос справочников переведён на
+  формат `v501` (`DictionaryNames`) вместо старого `v5` (`getGeoRegions`,
+  `getInterests` и т. п.). Изменения:
+  - `geo_regions(country_region="RUC")` — больше не фильтрует на сервере по
+    стране; возвращает весь мировой справочник (≈17 000 регионов). Клиент
+    должен фильтровать по `GeoRegionType`/`ParentId` локально (см. `RegionSelector`).
+  - Поля ответа: `GeoRegionId`, `GeoRegionName`, `GeoRegionType`, `ParentId`
+    вместо `GeoRegionId`, `ParentGeoRegionId`, `CountryRegion`, `IsArea`.
+  - Русские названия требуют заголовок `Accept-Language: ru` (по умолчанию
+    возвращаются английские).
+  - Справочники `RetargetingLists`, `Sites`, `AdTypes`, `BingTypes`,
+    `Keywords`, `GeoHierarchy` **отсутствуют в v501** — для них используется
+    старый `v5` формат (методы работают как раньше).
+- **`GeoRegion` модель**: поля изменены — `region_type` (`GeoRegionType`),
+  `parent_id` (`ParentId`); `country_region` и `is_area` убраны.
+  Свойство `is_top_level` теперь проверяет `region_type == "country"`
+  (в v501 у Country есть `ParentId` → World).
+- **`RegionSelector`**: резолв теперь работает с v501 иерархией
+  (`GeoRegionType`/`ParentId`). Сайд-эффект: исключаемые регионы (Москва, МО,
+  СПб, ЛО) резолвятся динамически из словаря (названия в v501 отличаются
+  от v5).
+
 ### Added
 - **STAGE_05, этап 0 — фундамент:**
   - `api_version` в `YandexDirectClient` и `Settings`: переключение между `v5`

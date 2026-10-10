@@ -91,6 +91,9 @@ class Transport:
             "Authorization": f"Bearer {settings.token}",
             "Content-Type": "application/json; charset=utf-8",
             "User-Agent": USER_AGENT,
+            # Справочники возвращают названия на языке запроса; по умолчанию —
+            # русский (актуально для GeoRegions, AudienceInterests и т. п.).
+            "Accept-Language": settings.accept_language,
         }
         # Client-Login обязателен только для агентского доступа. Прямому
         # рекламодателю заголовок не нужен — и Яндекс его не требует.

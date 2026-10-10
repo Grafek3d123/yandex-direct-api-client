@@ -38,15 +38,23 @@ class ClientInfo:
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "ClientInfo":
-        """Разобрать ответ `clients/get`.
+        """Разобрать один элемент ответа `clients/get`.
 
-        :param d: JSON-тело клиента.
+        Фактический контракт API (проверен живым запросом): секция
+        ``ClientInfo`` приходит строкой с отображаемым именем клиента, а не
+        объектом. Остальные поля (``Id``, ``Login``, ``Currency`` и т.д.)
+        API не возвращает — они остаются ``None`` и сохранены для плоских
+        ответов и моков.
+
+        :param d: JSON-объект одного клиента.
         :return: типизированная модель клиента.
         """
+        info = d.get("ClientInfo")
+        name = info if isinstance(info, str) else d.get("Name")
         return cls(
             id=to_int(d.get("Id")),
             login=d.get("Login"),
-            name=d.get("Name"),
+            name=name,
             currency=d.get("Currency"),
             time_zone=d.get("TimeZone"),
             is_agency=to_bool(d.get("Agency")),
@@ -56,14 +64,28 @@ class ClientInfo:
 
     @property
     def restrictions(self) -> Dict[str, int]:
-        """Лимиты клиента (`Restrictions`) в виде словаря имя → значение."""
+        """Лимиты клиента (`Restrictions`) в виде словаря имя → значение.
+
+        API отдаёт ``Restrictions`` списком объектов ``{Element, Value}``;
+        словарная форма поддержана как escape-hatch для моков и старых
+        ответов.
+        """
         raw = self.raw.get("Restrictions")
-        if not isinstance(raw, dict):
+        pairs: List[Any]
+        if isinstance(raw, list):
+            pairs = [
+                (item.get("Element"), item.get("Value"))
+                for item in raw
+                if isinstance(item, dict)
+            ]
+        elif isinstance(raw, dict):
+            pairs = list(raw.items())
+        else:
             return {}
         result: Dict[str, int] = {}
-        for key, value in raw.items():
+        for key, value in pairs:
             parsed = to_optional_int(value)
-            if parsed is not None:
+            if key is not None and parsed is not None:
                 result[str(key)] = parsed
         return result
 
@@ -103,24 +125,24 @@ class ClientsService:
     def get(self, fields: Optional[List[str]] = None) -> ClientInfo:
         """Параметры текущего клиента (`clients/get`).
 
-        :param fields: запрашиваемые поля; по умолчанию запрашивается
-            `Restrictions` вместе с основными параметрами.
+        API принимает строго два имени полей — `ClientInfo` и `Restrictions`
+        (проверено живым запросом); другие значения отклоняются как
+        `InvalidRequest`. Ответ — список `Clients`, берётся первый элемент.
+
+        :param fields: запрашиваемые поля; по умолчанию оба доступных.
         :return: типизированная модель клиента с лимитами.
         """
-        field_names = list(fields) if fields else [
-            "Id",
-            "Login",
-            "Name",
-            "Currency",
-            "TimeZone",
-            "Agency",
-            "Restrictions",
-        ]
+        field_names = list(fields) if fields else ["ClientInfo", "Restrictions"]
         payload: Dict[str, Any] = {
             "method": "get",
             "params": {"FieldNames": field_names},
         }
         result = self._transport.post_result("clients", payload)
+        clients = result.get("Clients")
+        if isinstance(clients, list) and clients:
+            first = clients[0]
+            if isinstance(first, dict):
+                return ClientInfo.from_dict(first)
         return ClientInfo.from_dict(result)
 
 

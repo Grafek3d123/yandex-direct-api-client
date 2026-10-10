@@ -53,7 +53,9 @@ from yandex_direct_api_client.validation import (
 )
 
 V5 = "https://api.direct.yandex.com/json/v5"
-DICTIONARIES_URL = f"{V5}/dictionaries/"
+V501 = "https://api.direct.yandex.com/json/v501"
+DICTIONARIES_URL_V5 = f"{V5}/dictionaries/"
+DICTIONARIES_URL_V501 = f"{V501}/dictionaries/"
 CREATIVES_URL = f"{V5}/creatives/"
 RETARGETING_URL = f"{V5}/retargetinglists/"
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent / "yandex_direct_api_client"
@@ -547,7 +549,7 @@ def test_dictionaries_keywords_rejects_blank(tmp_path: Path) -> None:
 def test_dictionaries_keywords_passes_geo_and_ad_types(tmp_path: Path) -> None:
     """`geo_ids` и `ad_types` попадают в тело запроса."""
     responses.add(
-        responses.POST, DICTIONARIES_URL, json={"result": {"Keywords": ["купить"]}}
+        responses.POST, DICTIONARIES_URL_V5, json={"result": {"Keywords": ["купить"]}}
     )
     cache = JsonCache(cache_dir=tmp_path / "cache")
 
@@ -566,20 +568,20 @@ def test_dictionaries_keywords_passes_geo_and_ad_types(tmp_path: Path) -> None:
 
 @responses.activate
 def test_dictionaries_simple_lists(tmp_path: Path) -> None:
-    """Типовые справочники: сайты, типы объявлений, часовые пояса, Bing."""
+    """Типовые справочники: сайты, типы объявлений, часовые пояса, Bing (v5)."""
     cache = JsonCache(cache_dir=tmp_path / "cache")
 
     with _client(cache) as client:
         responses.add(
             responses.POST,
-            DICTIONARIES_URL,
+            DICTIONARIES_URL_V5,
             json={"result": {"Sites": [{"Id": 1, "Name": "site", "Url": "https://s"}]}},
         )
         assert [s.name for s in client.dictionaries.sites()] == ["site"]
 
         responses.add(
             responses.POST,
-            DICTIONARIES_URL,
+            DICTIONARIES_URL_V5,
             json={
                 "result": {
                     "AdTypes": [{"AdType": "TEXT_AD", "Name": "Текстовое",
@@ -591,11 +593,11 @@ def test_dictionaries_simple_lists(tmp_path: Path) -> None:
 
         responses.add(
             responses.POST,
-            DICTIONARIES_URL,
+            DICTIONARIES_URL_V501,
             json={
                 "result": {
                     "TimeZones": [
-                        {"Name": "Europe/Moscow", "Offset": 3, "TimeZoneId": 1}
+                        {"TimeZone": "Europe/Moscow", "Offset": 3, "TimeZoneId": 1}
                     ]
                 }
             },
@@ -604,7 +606,7 @@ def test_dictionaries_simple_lists(tmp_path: Path) -> None:
 
         responses.add(
             responses.POST,
-            DICTIONARIES_URL,
+            DICTIONARIES_URL_V5,
             json={"result": {"BingTypes": [{"BingType": "X", "Name": "Икс"}]}},
         )
         assert client.dictionaries.bing_types()[0]["Name"] == "Икс"
@@ -616,23 +618,23 @@ def test_dictionaries_currency_rejects_bad_payload(tmp_path: Path) -> None:
     cache = JsonCache(cache_dir=tmp_path / "cache")
 
     with _client(cache) as client:
-        responses.add(responses.POST, DICTIONARIES_URL, json={"result": {}})
+        responses.add(responses.POST, DICTIONARIES_URL_V501, json={"result": {}})
         with pytest.raises(ApiError, match="Currencies"):
             client.dictionaries.currency()
 
         responses.add(
             responses.POST,
-            DICTIONARIES_URL,
+            DICTIONARIES_URL_V501,
             json={"result": {"Currencies": ["не словарь"]}},
         )
-        with pytest.raises(ApiError, match="Некорректная запись"):
+        with pytest.raises(ApiError, match="пустой список"):
             client.dictionaries.currency()
 
 
 @responses.activate
 def test_dictionaries_audience_missing_list_raises(tmp_path: Path) -> None:
     """Справочник аудитории без ожидаемого списка — `ApiError`."""
-    responses.add(responses.POST, DICTIONARIES_URL, json={"result": {}})
+    responses.add(responses.POST, DICTIONARIES_URL_V501, json={"result": {}})
     cache = JsonCache(cache_dir=tmp_path / "cache")
 
     with _client(cache) as client:
@@ -642,13 +644,13 @@ def test_dictionaries_audience_missing_list_raises(tmp_path: Path) -> None:
 
 @responses.activate
 def test_dictionaries_dicts_escape_hatch(tmp_path: Path) -> None:
-    """`dicts` — выход к любому справочнику, включая свой парсер."""
+    """`dicts` — выход к любому справочнику, включая свой парсер (v5 по умолчанию)."""
     cache = JsonCache(cache_dir=tmp_path / "cache")
 
     with _client(cache) as client:
         responses.add(
             responses.POST,
-            DICTIONARIES_URL,
+            DICTIONARIES_URL_V5,
             json={"result": {"SomeList": [{"Id": 1}]}},
         )
         raw = client.dictionaries.dicts("getSomethingNew")
@@ -657,7 +659,7 @@ def test_dictionaries_dicts_escape_hatch(tmp_path: Path) -> None:
 
         responses.add(
             responses.POST,
-            DICTIONARIES_URL,
+            DICTIONARIES_URL_V5,
             json={"result": {"SomeList": [{"Id": 2}]}},
         )
         parsed = client.dictionaries.dicts(

@@ -24,7 +24,8 @@ from yandex_direct_api_client.services.clients import (
     ClientInfo,
 )
 
-DICTIONARIES_URL = "https://api.direct.yandex.com/json/v5/dictionaries/"
+DICTIONARIES_URL_V5 = "https://api.direct.yandex.com/json/v5/dictionaries/"
+DICTIONARIES_URL_V501 = "https://api.direct.yandex.com/json/v501/dictionaries/"
 CLIENTS_URL = "https://api.direct.yandex.com/json/v5/clients/"
 
 
@@ -45,19 +46,20 @@ def _client(cache: JsonCache) -> YandexDirectClient:
 
 
 def _regions_payload() -> Dict[str, Any]:
-    """Справочник регионов РФ: 82 области + 4 исключённых + иерархия."""
+    """Справочник регионов РФ: 82 области + 4 исключённых + иерархия (v501 формат)."""
     regions: List[Dict[str, Any]] = [
-        {"GeoRegionId": 225, "GeoRegionName": "Россия", "CountryRegion": "RUC"},
+        {"GeoRegionId": 225, "GeoRegionName": "Россия", "GeoRegionType": "Country", "ParentId": 1},
     ]
     # 4 региона, которые бизнес исключает.
     regions += [
-        {"GeoRegionId": 213, "GeoRegionName": "Москва", "CountryRegion": "RUC"},
-        {"GeoRegionId": 214, "GeoRegionName": "Московская область", "CountryRegion": "RUC"},
-        {"GeoRegionId": 2, "GeoRegionName": "Санкт-Петербург", "CountryRegion": "RUC"},
+        {"GeoRegionId": 213, "GeoRegionName": "Москва", "GeoRegionType": "City", "ParentId": 225},
+        {"GeoRegionId": 214, "GeoRegionName": "Московская область", "GeoRegionType": "Region", "ParentId": 225},
+        {"GeoRegionId": 2, "GeoRegionName": "Санкт-Петербург", "GeoRegionType": "City", "ParentId": 225},
         {
             "GeoRegionId": 69,
             "GeoRegionName": "Ленинградская область",
-            "CountryRegion": "RUC",
+            "GeoRegionType": "Region",
+            "ParentId": 225,
         },
     ]
     # Ещё 80 областей (имитация полного справочника РФ).
@@ -66,8 +68,8 @@ def _regions_payload() -> Dict[str, Any]:
             {
                 "GeoRegionId": 1000 + i,
                 "GeoRegionName": f"Область {i}",
-                "ParentGeoRegionId": 225,
-                "CountryRegion": "RUC",
+                "GeoRegionType": "Region",
+                "ParentId": 225,
             }
         )
     return {"result": {"GeoRegions": regions}}
@@ -84,7 +86,7 @@ def cache(tmp_path: Path) -> JsonCache:
 
 @responses.activate
 def test_f11_geo_regions_parsed(cache: JsonCache) -> None:
-    responses.add(responses.POST, DICTIONARIES_URL, json=_regions_payload())
+    responses.add(responses.POST, DICTIONARIES_URL_V501, json=_regions_payload())
     with _client(cache) as c:
         regions = c.dictionaries.geo_regions("RUC")
     assert len(regions) >= 80
@@ -94,14 +96,14 @@ def test_f11_geo_regions_parsed(cache: JsonCache) -> None:
     assert any(r.name == "Москва" for r in regions)
     payload = _body_of(responses.calls[0])
     assert payload["method"] == "get"
-    assert "getGeoRegions" in payload["params"]
-    assert payload["params"]["getGeoRegions"]["CountryRegion"] == "RUC"
+    assert "DictionaryNames" in payload["params"]
+    assert payload["params"]["DictionaryNames"] == ["GeoRegions"]
 
 
 @responses.activate
 def test_f11_second_call_served_from_cache(cache: JsonCache) -> None:
     """Повторный вызов справочника не должен ходить в сеть (F-1.1 AC)."""
-    responses.add(responses.POST, DICTIONARIES_URL, json=_regions_payload())
+    responses.add(responses.POST, DICTIONARIES_URL_V501, json=_regions_payload())
     with _client(cache) as c:
         first = c.dictionaries.geo_regions()
         second = c.dictionaries.geo_regions()
@@ -115,7 +117,7 @@ def test_f11_cache_ttl_expiry_triggers_refetch(
     cache: JsonCache, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Просроченная запись кэша не используется."""
-    responses.add(responses.POST, DICTIONARIES_URL, json=_regions_payload())
+    responses.add(responses.POST, DICTIONARIES_URL_V501, json=_regions_payload())
     with _client(cache) as c:
         c.dictionaries.geo_regions()
         # Подставляем запись в прошлое.
@@ -130,7 +132,7 @@ def test_f11_cache_ttl_expiry_triggers_refetch(
 
 @responses.activate
 def test_f11_use_cache_false_always_fetches(cache: JsonCache) -> None:
-    responses.add(responses.POST, DICTIONARIES_URL, json=_regions_payload())
+    responses.add(responses.POST, DICTIONARIES_URL_V501, json=_regions_payload())
     with _client(cache) as c:
         c.dictionaries.geo_regions(use_cache=False)
         c.dictionaries.geo_regions(use_cache=False)
@@ -139,7 +141,7 @@ def test_f11_use_cache_false_always_fetches(cache: JsonCache) -> None:
 
 @responses.activate
 def test_f11_clear_cache_forces_refetch(cache: JsonCache) -> None:
-    responses.add(responses.POST, DICTIONARIES_URL, json=_regions_payload())
+    responses.add(responses.POST, DICTIONARIES_URL_V501, json=_regions_payload())
     with _client(cache) as c:
         c.dictionaries.geo_regions()
         assert c.dictionaries.clear_cache() is True
@@ -150,11 +152,11 @@ def test_f11_clear_cache_forces_refetch(cache: JsonCache) -> None:
 @responses.activate
 def test_f11_unknown_dictionary_raises_api_error(cache: JsonCache) -> None:
     """Неожиданный формат ответа справочника — понятная ApiError."""
-    responses.add(responses.POST, DICTIONARIES_URL, json={"result": {}})
+    responses.add(responses.POST, DICTIONARIES_URL_V501, json={"result": {}})
     with _client(cache) as c:
         with pytest.raises(ApiError) as exc:
             c.dictionaries.geo_regions()
-    assert "getGeoRegions" in str(exc.value)
+    assert "GeoRegions" in str(exc.value)
 
 
 @responses.activate
@@ -162,7 +164,7 @@ def test_f11_broken_cache_file_is_ignored(cache: JsonCache) -> None:
     """Битый файл кэша не ломает клиент — запрос идёт в сеть."""
     cache.cache_dir.mkdir(parents=True, exist_ok=True)
     (cache.cache_dir / CACHE_FILE_NAME).write_text("{не json", encoding="utf-8")
-    responses.add(responses.POST, DICTIONARIES_URL, json=_regions_payload())
+    responses.add(responses.POST, DICTIONARIES_URL_V501, json=_regions_payload())
     with _client(cache) as c:
         regions = c.dictionaries.geo_regions()
     assert len(regions) >= 80
@@ -172,12 +174,12 @@ def test_f11_broken_cache_file_is_ignored(cache: JsonCache) -> None:
 def test_f11_interests_and_retargeting_lists(cache: JsonCache) -> None:
     responses.add(
         responses.POST,
-        DICTIONARIES_URL,
-        json={"result": {"Interests": [{"InterestId": 1, "InterestName": "Авто"}]}},
+        DICTIONARIES_URL_V501,
+        json={"result": {"Interests": [{"InterestId": 1, "Name": "Авто", "ParentId": 0, "IsTargetable": "YES"}]}},
     )
     responses.add(
         responses.POST,
-        DICTIONARIES_URL,
+        DICTIONARIES_URL_V5,
         json={
             "result": {
                 "RetargetingLists": [
@@ -199,7 +201,8 @@ def test_f11_interests_and_retargeting_lists(cache: JsonCache) -> None:
     assert interests[0].name == "Авто"
     assert lists[0].id == 7
     assert lists[0].goal_id == 123
-    assert "getInterests" in _body_of(responses.calls[0])["params"]
+    assert "DictionaryNames" in _body_of(responses.calls[0])["params"]
+    assert _body_of(responses.calls[0])["params"]["DictionaryNames"] == ["Interests"]
     assert "getRetargetingLists" in _body_of(responses.calls[1])["params"]
 
 
@@ -207,7 +210,7 @@ def test_f11_interests_and_retargeting_lists(cache: JsonCache) -> None:
 def test_f11_currency_returns_single_object(cache: JsonCache) -> None:
     responses.add(
         responses.POST,
-        DICTIONARIES_URL,
+        DICTIONARIES_URL_V501,
         json={"result": {"Currencies": [{"Currency": "RUB", "Name": "рубль"}]}},
     )
     with _client(cache) as c:
@@ -219,7 +222,7 @@ def test_f11_currency_returns_single_object(cache: JsonCache) -> None:
 def test_f11_dicts_escape_hatch(cache: JsonCache) -> None:
     responses.add(
         responses.POST,
-        DICTIONARIES_URL,
+        DICTIONARIES_URL_V5,
         json={"result": {"BingTypes": [{"BingType": "ALL", "Name": "Все"}]}},
     )
     with _client(cache) as c:
@@ -233,8 +236,8 @@ def test_f11_dicts_escape_hatch(cache: JsonCache) -> None:
 def test_f11_geo_hierarchy(cache: JsonCache) -> None:
     responses.add(
         responses.POST,
-        DICTIONARIES_URL,
-        json={"result": {"GeoRegions": [{"GeoRegionId": 1, "GeoRegionName": "Москва"}]}},
+        DICTIONARIES_URL_V5,
+        json={"result": {"GeoRegions": [{"GeoRegionId": 1, "GeoRegionName": "Москва", "GeoRegionType": "City", "ParentId": 225}]}},
     )
     with _client(cache) as c:
         regions = c.dictionaries.geo_hierarchy([213])
@@ -248,7 +251,7 @@ def test_f11_geo_hierarchy(cache: JsonCache) -> None:
 @responses.activate
 def test_f12_exclude_four_regions(cache: JsonCache) -> None:
     """«Вся РФ кроме МСК/МО/СПб/ЛО» — прямой ответ на вопрос бизнеса."""
-    responses.add(responses.POST, DICTIONARIES_URL, json=_regions_payload())
+    responses.add(responses.POST, DICTIONARIES_URL_V501, json=_regions_payload())
     selector = RegionSelector(
         exclude=["Москва", "Московская область", "Санкт-Петербург", "Ленинградская область"]
     )
@@ -262,7 +265,7 @@ def test_f12_exclude_four_regions(cache: JsonCache) -> None:
 
 @responses.activate
 def test_f12_repeat_resolve_makes_no_extra_requests(cache: JsonCache) -> None:
-    responses.add(responses.POST, DICTIONARIES_URL, json=_regions_payload())
+    responses.add(responses.POST, DICTIONARIES_URL_V501, json=_regions_payload())
     selector = RegionSelector(exclude=["Москва"])
     with _client(cache) as c:
         first = c.regions(selector)
@@ -273,7 +276,7 @@ def test_f12_repeat_resolve_makes_no_extra_requests(cache: JsonCache) -> None:
 
 @responses.activate
 def test_f12_include_by_id_name_and_code(cache: JsonCache) -> None:
-    responses.add(responses.POST, DICTIONARIES_URL, json=_regions_payload())
+    responses.add(responses.POST, DICTIONARIES_URL_V501, json=_regions_payload())
     with _client(cache) as c:
         ids = c.regions(RegionSelector(include=[213, "Московская область"]))
     assert ids == [213, 214]
@@ -282,7 +285,7 @@ def test_f12_include_by_id_name_and_code(cache: JsonCache) -> None:
 
 @responses.activate
 def test_f12_unknown_region_raises_with_suggestions(cache: JsonCache) -> None:
-    responses.add(responses.POST, DICTIONARIES_URL, json=_regions_payload())
+    responses.add(responses.POST, DICTIONARIES_URL_V501, json=_regions_payload())
     with _client(cache) as c:
         with pytest.raises(ValidationError) as exc:
             c.regions(RegionSelector(include=["Москва-не-существует"]))
@@ -295,12 +298,12 @@ def test_f12_ambiguous_region_raises(cache: JsonCache) -> None:
     """Два региона с одинаковым названием → требование уточнить, а не выбор."""
     responses.add(
         responses.POST,
-        DICTIONARIES_URL,
+        DICTIONARIES_URL_V501,
         json={
             "result": {
                 "GeoRegions": [
-                    {"GeoRegionId": 1, "GeoRegionName": "Тверская область"},
-                    {"GeoRegionId": 2, "GeoRegionName": "Тверская область"},
+                    {"GeoRegionId": 1, "GeoRegionName": "Тверская область", "GeoRegionType": "Region", "ParentId": 225},
+                    {"GeoRegionId": 2, "GeoRegionName": "Тверская область", "GeoRegionType": "Region", "ParentId": 225},
                 ]
             }
         },
@@ -314,8 +317,8 @@ def test_f12_ambiguous_region_raises(cache: JsonCache) -> None:
 @responses.activate
 def test_f12_empty_resolution_raises(cache: JsonCache) -> None:
     """Исключение всех регионов → ValidationError, а не `RegionIds: []`."""
-    payload = {"result": {"GeoRegions": [{"GeoRegionId": 1, "GeoRegionName": "Москва"}]}}
-    responses.add(responses.POST, DICTIONARIES_URL, json=payload)
+    payload = {"result": {"GeoRegions": [{"GeoRegionId": 1, "GeoRegionName": "Москва", "GeoRegionType": "City", "ParentId": 225}]}}
+    responses.add(responses.POST, DICTIONARIES_URL_V501, json=payload)
     with _client(cache) as c:
         with pytest.raises(ValidationError):
             c.regions(RegionSelector(include=[1], exclude=[1]))
@@ -323,7 +326,7 @@ def test_f12_empty_resolution_raises(cache: JsonCache) -> None:
 
 @responses.activate
 def test_f12_no_lists_raises(cache: JsonCache) -> None:
-    responses.add(responses.POST, DICTIONARIES_URL, json=_regions_payload())
+    responses.add(responses.POST, DICTIONARIES_URL_V501, json=_regions_payload())
     with _client(cache) as c:
         with pytest.raises(ValidationError):
             c.regions(RegionSelector())
@@ -331,7 +334,7 @@ def test_f12_no_lists_raises(cache: JsonCache) -> None:
 
 @responses.activate
 def test_f12_include_all_russia(cache: JsonCache) -> None:
-    responses.add(responses.POST, DICTIONARIES_URL, json=_regions_payload())
+    responses.add(responses.POST, DICTIONARIES_URL_V501, json=_regions_payload())
     with _client(cache) as c:
         all_ids = c.regions(RegionSelector().include_all_russia())
         without_msk = c.regions(RegionSelector().include_all_russia().include_all_russia())
@@ -353,7 +356,7 @@ def test_f12_current_reads_region_ids_from_model_and_dict() -> None:
 @responses.activate
 def test_f12_fake_region_id_rejected(cache: JsonCache) -> None:
     """Выдуманные ID запрещены (D5)."""
-    responses.add(responses.POST, DICTIONARIES_URL, json=_regions_payload())
+    responses.add(responses.POST, DICTIONARIES_URL_V501, json=_regions_payload())
     with _client(cache) as c:
         with pytest.raises(ValidationError) as exc:
             c.regions(RegionSelector(include=[999999]))
@@ -370,22 +373,27 @@ def test_f13_clients_get_parsed(cache: JsonCache) -> None:
         CLIENTS_URL,
         json={
             "result": {
-                "Id": 123,
-                "Login": "client",
-                "Currency": "RUB",
-                "TimeZone": "Europe/Moscow",
-                "Agency": "no",
-                "Restrictions": {
-                    "CAMPAIGNS_TOTAL_PER_CLIENT": 100,
-                    "CAMPAIGNS_UNARCHIVED_PER_CLIENT": 50,
-                },
+                "Clients": [
+                    {
+                        "ClientInfo": "Тестовый клиент",
+                        "Restrictions": [
+                            {
+                                "Element": "CAMPAIGNS_TOTAL_PER_CLIENT",
+                                "Value": 100,
+                            },
+                            {
+                                "Element": "CAMPAIGNS_UNARCHIVED_PER_CLIENT",
+                                "Value": 50,
+                            },
+                        ],
+                    }
+                ]
             }
         },
     )
     with _client(cache) as c:
         info = c.clients.get()
-    assert info.id == 123
-    assert info.currency == "RUB"
+    assert info.name == "Тестовый клиент"
     assert info.restriction(LIMIT_CAMPAIGNS_TOTAL) == 100
     assert info.can_create_campaign(5) is True
     assert info.can_create_campaign(60) is False

@@ -19,12 +19,13 @@ https://yandex.ru/dev/direct/doc/ru/dictionaries/dictionaries.html
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional, Sequence, Type, TypeVar
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Type, TypeVar
 
 from .._transport import Transport
 from ..cache import DEFAULT_TTL_SECONDS, JsonCache
 from ..exceptions import ApiError
 from ..limits import DICTIONARIES_GET_MAX
+from ..models._helpers import to_str
 from ..models.dictionaries import (
     AdType,
     AudienceCriteriaType,
@@ -43,6 +44,28 @@ _T = TypeVar("_T")
 
 #: Поля, которые нужны для работы `RegionSelector` и проверок лимитов.
 _GEO_FIELDS = ["GeoRegionId", "GeoRegionName", "ParentGeoRegionId", "CountryRegion"]
+
+#: Легаси-коды стран (`country_region`) → возможные имена узла `Country` в
+#: справочнике `GeoRegions` v501. Имена зависят от локали аккаунта, поэтому
+#: для каждого кода перечислены русское и английское написание. Код подбирается
+#: регистронезависимо; если узел не найден — `ApiError` со списком доступных.
+_COUNTRY_ALIASES: Dict[str, tuple[str, ...]] = {
+    "RUC": ("Россия", "Russia"),
+    "USA": ("США", "United States", "USA"),
+    "GBR": ("Великобритания", "United Kingdom", "Great Britain"),
+    "DEU": ("Германия", "Germany"),
+    "FRA": ("Франция", "France"),
+    "TUR": ("Турция", "Turkey"),
+    "ESP": ("Испания", "Spain"),
+    "ITA": ("Италия", "Italy"),
+    "KAZ": ("Казахстан", "Kazakhstan"),
+    "BLR": ("Беларусь", "Belarus"),
+    "UKR": ("Украина", "Ukraine"),
+    "CHN": ("Китай", "China"),
+    "JPN": ("Япония", "Japan"),
+    "POL": ("Польша", "Poland"),
+    "CZE": ("Чехия", "Czechia", "Czech Republic"),
+}
 _INTEREST_FIELDS = ["InterestId", "InterestName"]
 _RETARGETING_FIELDS = [
     "RetargetingListId",
@@ -78,6 +101,41 @@ class DictionariesService:
         """
         return self._cache.clear()
 
+    def _dictionary_by_name(
+        self,
+        dictionary: str,
+        *,
+        use_cache: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """Загрузить справочник через `DictionaryNames` (формат v501).
+
+        :param dictionary: имя справочника (`GeoRegions`, `Interests`, …).
+        :param use_cache: использовать ли дисковый кэш.
+        :return: список сырых записей справочника.
+        :raises ApiError: если в ответе нет ожидаемого списка.
+        """
+        cache_key: Dict[str, Any] = {"dictionary": dictionary, "params": {}}
+        if use_cache:
+            cached = self._cache.get(dictionary, cache_key)
+            if cached is not None:
+                return list(cached)
+
+        payload: Dict[str, Any] = {
+            "method": "get",
+            "params": {"DictionaryNames": [dictionary]},
+        }
+        result = self._transport.post_result("dictionaries", payload, api_version="v501")
+        items = result.get(dictionary)
+        if not isinstance(items, list):
+            raise ApiError(
+                f"Справочник {dictionary} не вернул список {dictionary}",
+                response_body=result,
+            )
+        raw_items: List[Dict[str, Any]] = [i for i in items if isinstance(i, dict)]
+        if use_cache:
+            self._cache.set(dictionary, cache_key, raw_items)
+        return raw_items
+
     def _dictionary(
         self,
         dictionary: str,
@@ -86,7 +144,11 @@ class DictionariesService:
         *,
         use_cache: bool = True,
     ) -> List[Dict[str, Any]]:
-        """Загрузить один справочник с кэшированием.
+        """Загрузить один справочник старым форматом (v5) с кэшированием.
+
+        Используется для словарей, которых нет в v501:
+        `getRetargetingLists`, `getSites`, `getAdTypes`, `getBingTypes`,
+        `getGeoHierarchy`, `getKeywords`.
 
         :param dictionary: имя словаря как ключ в `params`
             (`getGeoRegions`, `getInterests`, ...).
@@ -106,7 +168,7 @@ class DictionariesService:
             "method": "get",
             "params": {dictionary: params},
         }
-        result = self._transport.post_result("dictionaries", payload)
+        result = self._transport.post_result("dictionaries", payload, api_version="v5")
         items = result.get(result_key)
         if not isinstance(items, list):
             raise ApiError(
@@ -132,22 +194,84 @@ class DictionariesService:
         *,
         use_cache: bool = True,
     ) -> List[GeoRegion]:
-        """Регионы страны (`getGeoRegions`).
+        """Регионы страны (`GeoRegions`).
 
-        :param country_region: код страны, например `RUC` (Россия).
-        :param use_cache: использовать ли дисковый кэш (по умолчанию да).
-        :return: список регионов с `id`, `name`, `parent_id`.
+        В v501 API возвращает **всё мировое дерево** через `DictionaryNames`,
+        поля записей: ``GeoRegionId``, ``GeoRegionName``, ``GeoRegionType``,
+        ``ParentId``. Иерархия строится по ``ParentId``: ``World → Country →
+        субъекты → населённые пункты``.
+
+        ``country_region`` — легаси-параметр. SDK сопоставляет код страны с
+        именем узла ``Country`` через встроенный маппинг ``_COUNTRY_ALIASES``
+        (регистронезависимо); если ни одно имя не совпало — ``ApiError``
+        с перечнем доступных стран.
+
+        :param country_region: код страны, например ``RUC`` (Россия).
+        :param use_cache: использовать ли дисковый кэш.
+        :return: поддереvo региона для указанной страны (включая саму страну).
+        :raises ApiError: если страна не найдена в справочнике.
         """
-        items = self._dictionary(
-            "getGeoRegions",
-            {
-                "CountryRegion": country_region,
-                "GeoRegionFieldNames": _GEO_FIELDS,
-            },
-            "GeoRegions",
-            use_cache=use_cache,
-        )
-        return self._parse(items, GeoRegion)
+        all_items = self._dictionary_by_name("GeoRegions", use_cache=use_cache)
+        if not all_items:
+            return []
+
+        country_nodes = [
+            item
+            for item in all_items
+            if str(item.get("GeoRegionType", "")).lower() == "country"
+        ]
+
+        # Плоский справочник без иерархии (нет узлов Country) — фильтровать по
+        # стране нечем: возвращаем все записи как есть.
+        if not country_nodes:
+            return self._parse(all_items, GeoRegion)
+
+        # 1. Найти Country-узел по коду (case-insensitive, по алиасам).
+        target = country_region.strip().upper()
+        names = _COUNTRY_ALIASES.get(target)
+        if names is None:
+            # Код не в маппинге — пытаемся точное совпадение имени (если
+            # пользователь передал имя страны напрямую).
+            names = (country_region,)
+
+        country_root: Optional[Dict[str, Any]] = None
+        for item in country_nodes:
+            name_raw = to_str(item.get("GeoRegionName"))
+            if name_raw and name_raw.lower() in {n.lower() for n in names}:
+                country_root = item
+                break
+
+        # 2. Если Country-узел не найден — собрать список доступных стран.
+        if country_root is None:
+            available = sorted(
+                {to_str(i.get("GeoRegionName")) for i in country_nodes}
+            )
+            raise ApiError(
+                f"Страна {country_region!r} не найдена в GeoRegions. "
+                f"Доступные страны ({len(available)}): {', '.join(available[:10])}."
+            )
+
+        # 3. Собрать поддерево через ParentId (BFS), включая сам Country.
+        root_id = int(country_root["GeoRegionId"])
+        children_map: Dict[int, List[Dict[str, Any]]] = {}
+        for item in all_items:
+            parent = item.get("ParentId")
+            if parent is not None:
+                children_map.setdefault(int(parent), []).append(item)
+
+        result: List[Dict[str, Any]] = [country_root]
+        queue: List[int] = [root_id]
+        visited: Set[int] = {root_id}
+        while queue:
+            cur = queue.pop(0)
+            for child in children_map.get(cur, []):
+                cid = int(child["GeoRegionId"])
+                if cid not in visited:
+                    visited.add(cid)
+                    result.append(child)
+                    queue.append(cid)
+
+        return self._parse(result, GeoRegion)
 
     def geo_hierarchy(
         self,
@@ -174,25 +298,24 @@ class DictionariesService:
         )
         return self._parse(items, GeoRegion)
 
-    # ---------------- интересы и ключевые фразы ----------------
+    # ---------------- интересы ----------------
     def interests(
         self,
         geo_id: Optional[int] = None,
         *,
         use_cache: bool = True,
     ) -> List[Interest]:
-        """Интересы (`getInterests`), опционально для одного региона.
+        """Интересы (`Interests`).
 
-        :param geo_id: ID региона; None — справочник по умолчанию.
+        В v501 API запрашивает все интересы через `DictionaryNames`,
+        параметр `geo_id` больше не используется (интересы не фильтруются
+        по региону).
+
+        :param geo_id: ID региона (игнорируется, сохранён для совместимости).
         :param use_cache: использовать ли дисковый кэш.
         :return: список интересов.
         """
-        params: Dict[str, Any] = {"InterestFieldNames": _INTEREST_FIELDS}
-        if geo_id is not None:
-            params["GeoId"] = int(geo_id)
-        items = self._dictionary(
-            "getInterests", params, "Interests", use_cache=use_cache
-        )
+        items = self._dictionary_by_name("Interests", use_cache=use_cache)
         return self._parse(items, Interest)
 
     def keywords(
@@ -270,41 +393,25 @@ class DictionariesService:
         return self._parse(items, AdType)
 
     def time_zones(self, *, use_cache: bool = True) -> List[TimeZone]:
-        """Часовые пояса (`getTimeZones`).
+        """Часовые пояса (`TimeZones`).
 
         :param use_cache: использовать ли дисковый кэш.
         :return: список часовых поясов.
         """
-        items = self._dictionary(
-            "getTimeZones",
-            {"TimeZoneFieldNames": _TIME_ZONE_FIELDS},
-            "TimeZones",
-            use_cache=use_cache,
-        )
+        items = self._dictionary_by_name("TimeZones", use_cache=use_cache)
         return self._parse(items, TimeZone)
 
-    def currency(self) -> Currency:
-        """Валюта аккаунта (`getCurrency`).
+    def currency(self, *, use_cache: bool = True) -> Currency:
+        """Валюта аккаунта (`Currencies`).
 
-        Ответ — объект, а не список, поэтому кэш здесь не используется.
-
+        :param use_cache: использовать ли дисковый кэш.
         :return: валюта аккаунта.
-        :raises ApiError: если ответ не содержит валюту.
+        :raises ApiError: если справочник вернул пустой список.
         """
-        payload: Dict[str, Any] = {
-            "method": "get",
-            "params": {
-                "getCurrency": {"CurrencyFieldNames": _CURRENCY_FIELDS},
-            },
-        }
-        result = self._transport.post_result("dictionaries", payload)
-        currencies = result.get("Currencies")
-        if not isinstance(currencies, list) or not currencies:
-            raise ApiError("Справочник getCurrency не вернул Currencies", response_body=result)
-        first = currencies[0]
-        if not isinstance(first, dict):
-            raise ApiError("Некорректная запись валюты", response_body=result)
-        return Currency.from_dict(first)
+        items = self._dictionary_by_name("Currencies", use_cache=use_cache)
+        if not items:
+            raise ApiError("Справочник Currencies вернул пустой список")
+        return Currency.from_dict(items[0])
 
     # ---------------- сегменты аудитории (слой 4) ----------------
     def _audience_dictionary(
@@ -314,14 +421,14 @@ class DictionariesService:
         *,
         use_cache: bool = True,
     ) -> List[Dict[str, Any]]:
-        """Загрузить справочник по `DictionaryNames` (новый формат `dictionaries`).
+        """Загрузить справочник по `DictionaryNames` (формат v501).
 
         Справочники сегментов (`AudienceDemographicProfiles`, `AudienceInterests`,
         `AudienceCriteriaTypes`) запрашиваются не объектом-ключом в `params`, а
         элементом массива `DictionaryNames`, и не имеют `*FieldNames`.
 
         :param dictionary: имя справочника.
-        :param result_key: имя списка в `result` ответа.
+        :param result_key: имя списка в `result` ответе.
         :param use_cache: использовать ли дисковый кэш.
         :return: список сырых записей справочника.
         :raises ApiError: если в ответе нет ожидаемого списка.
@@ -336,7 +443,7 @@ class DictionariesService:
             "method": "get",
             "params": {"DictionaryNames": [dictionary]},
         }
-        result = self._transport.post_result("dictionaries", payload)
+        result = self._transport.post_result("dictionaries", payload, api_version="v501")
         items = result.get(result_key)
         if not isinstance(items, list):
             raise ApiError(
@@ -433,6 +540,7 @@ class DictionariesService:
         *,
         use_cache: bool = True,
         parser: Optional[Callable[[Dict[str, Any]], List[_T]]] = None,
+        api_version: str = "v5",
     ) -> Any:
         """Эскапирующий доступ к любому словарю `dictionaries`.
 
@@ -445,12 +553,15 @@ class DictionariesService:
         :param use_cache: использовать ли дисковый кэш.
         :param parser: необязательная функция разбора `result`;
             по умолчанию возвращаются `DictEntry` (по одной на список ответа).
+        :param api_version: версия API (`v5` или `v501`). По умолчанию `v5`
+            для совместимости со старыми словарями.
         :return: результат парсера либо список `DictEntry`.
         """
         dictionary_params: Dict[str, Any] = dict(params or {})
         result = self._transport.post_result(
             "dictionaries",
             {"method": "get", "params": {field: dictionary_params}},
+            api_version=api_version,
         )
         if parser is not None:
             return parser(result)

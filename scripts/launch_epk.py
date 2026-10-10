@@ -108,7 +108,7 @@ class EpkLaunchSpec(LaunchSpecBase):
     business_id: Optional[int] = None
     counter_ids: Optional[Sequence[int]] = None
     network_strategy: str = "NETWORK_DEFAULT"
-    search_strategy: str = "SERVING_OFF"
+    search_strategy: str = "WB_MAXIMUM_CLICKS"
     bid: float = DEFAULT_BID
     goal_id: Optional[int] = None
 

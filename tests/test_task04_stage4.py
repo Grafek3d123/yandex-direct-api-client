@@ -55,7 +55,8 @@ from yandex_direct_api_client.services.retargeting_lists import (
 )
 from yandex_direct_api_client.services.targeting import TargetingService
 
-DICT_URL = "https://api.direct.yandex.com/json/v5/dictionaries/"
+DICT_URL_V5 = "https://api.direct.yandex.com/json/v5/dictionaries/"
+DICT_URL_V501 = "https://api.direct.yandex.com/json/v501/dictionaries/"
 RL_URL = "https://api.direct.yandex.com/json/v5/retargetinglists/"
 AT_URL = "https://api.direct.yandex.com/json/v5/audiencetargets/"
 ADJ_URL = "https://api.direct.yandex.com/json/v5/retargetingadjustments/"
@@ -497,7 +498,7 @@ def test_build_ad_group_supports_dynamic_types() -> None:
 @responses.activate
 def test_audience_demographic_profiles_dictionaries() -> None:
     responses.add(
-        responses.POST, DICT_URL, json={"result": {"AudienceDemographicProfiles": PROFILES}}
+        responses.POST, DICT_URL_V501, json={"result": {"AudienceDemographicProfiles": PROFILES}}
     )
     with _client() as c:
         segments = c.dictionaries.audience_demographic_profiles()
@@ -511,7 +512,7 @@ def test_audience_demographic_profiles_dictionaries() -> None:
 @responses.activate
 def test_audience_profiles_of_type_filters() -> None:
     responses.add(
-        responses.POST, DICT_URL, json={"result": {"AudienceDemographicProfiles": PROFILES}}
+        responses.POST, DICT_URL_V501, json={"result": {"AudienceDemographicProfiles": PROFILES}}
     )
     with _client() as c:
         ages = c.dictionaries.audience_profiles_of_type("AGE")
@@ -522,7 +523,7 @@ def test_audience_profiles_of_type_filters() -> None:
 def test_audience_criteria_types_and_interests() -> None:
     responses.add(
         responses.POST,
-        DICT_URL,
+        DICT_URL_V501,
         json={
             "result": {
                 "AudienceCriteriaTypes": [
@@ -538,7 +539,7 @@ def test_audience_criteria_types_and_interests() -> None:
     )
     responses.add(
         responses.POST,
-        DICT_URL,
+        DICT_URL_V501,
         json={
             "result": {
                 "AudienceInterests": [
@@ -562,7 +563,7 @@ def test_audience_criteria_types_and_interests() -> None:
 
 @responses.activate
 def test_audience_dictionary_missing_list_raises() -> None:
-    responses.add(responses.POST, DICT_URL, json={"result": {}})
+    responses.add(responses.POST, DICT_URL_V501, json={"result": {}})
     with _client() as c:
         with pytest.raises(ApiError):
             c.dictionaries.audience_demographic_profiles()
@@ -758,7 +759,7 @@ def _transport_of(client: YandexDirectClient) -> Any:
 @responses.activate
 def test_full_scenario_segment_to_condition_to_adjustment() -> None:
     responses.add(
-        responses.POST, DICT_URL, json={"result": {"AudienceDemographicProfiles": PROFILES}}
+        responses.POST, DICT_URL_V501, json={"result": {"AudienceDemographicProfiles": PROFILES}}
     )
     responses.add(
         responses.POST, RL_URL, json={"result": {"AddResults": [{"Id": 700}]}}
@@ -838,7 +839,7 @@ def test_create_audience_target_surfaces_item_error() -> None:
 def test_resolve_interest_uses_dictionary() -> None:
     responses.add(
         responses.POST,
-        DICT_URL,
+        DICT_URL_V501,
         json={
             "result": {
                 "Interests": [
@@ -856,7 +857,7 @@ def test_resolve_interest_uses_dictionary() -> None:
 @responses.activate
 def test_demographic_segment_names_listing() -> None:
     responses.add(
-        responses.POST, DICT_URL, json={"result": {"AudienceDemographicProfiles": PROFILES}}
+        responses.POST, DICT_URL_V501, json={"result": {"AudienceDemographicProfiles": PROFILES}}
     )
     with _client() as c:
         assert c.targeting.demographic_segment_names("AGE") == ["18-24", "25-34"]

@@ -314,9 +314,9 @@ print("campaign", campaign["Id"], "group", group["Id"], "ad", ad["Id"])
 | `get_unified(ids)` | Read ЕПК campaigns (`v501`) | no |
 | `delete_unified(ids, confirm=False)` | Delete ЕПК campaigns (`v501`) | **yes** |
 | `get_budgets(ids)` | Read weekly/daily budgets (v5, then v501 fallback) | no |
-  | `set_weekly_budget(ids, budget, *, verify=True, confirm=False, strategy=None)` | Set the weekly budget with read-back verification (`strategy` — `MANUAL_CPM` for CPM, required to switch networks) | **yes** |
+| `set_weekly_budget(ids, budget, *, verify=True, confirm=False, strategy=None)` | Set the weekly budget with read-back verification (`strategy` — `MANUAL_CPM` for CPM, required to switch networks) | **yes** |
 | `set_daily_budget(ids, budget, *, verify=True, confirm=False)` | Set the deprecated daily budget | **yes** |
-  | `set_bid_strategy(ids, strategy, *, weekly_budget=None, confirm=False, verify=True)` | Change the bidding strategy (optionally with the weekly budget) | **yes** |
+| `set_bid_strategy(ids, strategy, *, weekly_budget=None, confirm=False, verify=True)` | Change the bidding strategy (optionally with the weekly budget) | **yes** |
 
 Money is passed in account currency (`"500"`, `500`, `Decimal("500.00")`) and
 converted to API units (×1 000 000) on the wire; `from_money_units()` converts
